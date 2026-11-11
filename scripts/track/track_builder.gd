@@ -54,13 +54,13 @@ static func add_environment(parent: Node3D) -> void:
 	sky.sky_material = sm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.75
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure = 1.05
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color("c9b8a6")
+	env.ambient_light_energy = 0.35
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	env.fog_enabled = true
-	env.fog_light_color = Color("e2bf98")
-	env.fog_density = 0.0016
+	env.fog_light_color = Color("c99a72")
+	env.fog_density = 0.0007
 	env.fog_sky_affect = 0.3
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -68,7 +68,7 @@ static func add_environment(parent: Node3D) -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, -38, 0)
 	sun.light_color = Color(1.0, 0.92, 0.8)
-	sun.light_energy = 1.25
+	sun.light_energy = 1.0
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 140.0
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
@@ -84,12 +84,12 @@ func _ground() -> void:
 	m.albedo_color = SAND
 	m.roughness = 1.0
 	mi.material_override = m
-	mi.position = Vector3(130, -0.02, 40)
+	mi.position = Vector3(130, -0.03, 40)
 	root.add_child(mi)
 	# darker sand patches for texture/scale cues
-	var mm := _multimesh(_cyl_mesh(1.0, 1.0, 0.02, 8), 260, true)
+	var mm := _multimesh(_cyl_mesh(1.0, 1.0, 0.01, 8), 260, true)
 	for i in 260:
-		var p := Vector3(rng.randf_range(-350, 600), 0.0, rng.randf_range(-450, 550))
+		var p := Vector3(rng.randf_range(-350, 600), -0.012, rng.randf_range(-450, 550))
 		var r := rng.randf_range(4, 18)
 		var t := Transform3D(Basis().scaled(Vector3(r, 1, r * rng.randf_range(0.5, 1.2))).rotated(Vector3.UP, rng.randf() * TAU), p)
 		mm.multimesh.set_instance_transform(i, t)
@@ -97,7 +97,7 @@ func _ground() -> void:
 	root.add_child(mm)
 
 
-func _strip(offset_a: float, offset_b: float, y: float, color: Color, jitter := 0.0, filter := Callable()) -> MeshInstance3D:
+func _strip(offset_a: Vector2, offset_b: Vector2, y: float, color: Color, jitter := 0.0, filter := Callable()) -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var n := track.count
@@ -127,34 +127,30 @@ func _strip(offset_a: float, offset_b: float, y: float, color: Color, jitter := 
 	mi.mesh = st.commit()
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.95
 	mi.material_override = m
 	root.add_child(mi)
 	return mi
 
 
-## Offsets >= 1000 are relative to the half width: 1000 + x means (half_width + x).
-## Offsets <= -1000 mean -(half_width + x).
-static func _off(o: float, hw: float) -> float:
-	if o >= 1000.0:
-		return hw + (o - 1000.0)
-	if o <= -1000.0:
-		return -(hw + (-o - 1000.0))
-	return o
+## Lateral offset encoded as Vector2(k, c) = k * half_width + c (meters, + = right).
+static func _off(o: Vector2, hw: float) -> float:
+	return o.x * hw + o.y
 
 
 func _road() -> void:
-	_strip(-1003.0, -1000.0, 0.01, SHOULDER)
-	_strip(1000.0, 1003.0, 0.01, SHOULDER)
-	_strip(-1000.0, 1000.0, 0.02, ASPHALT, 0.04)
+	_strip(Vector2(-1, -3.5), Vector2(-1, 0), 0.01, SHOULDER)
+	_strip(Vector2(1, 0), Vector2(1, 3.5), 0.01, SHOULDER)
+	_strip(Vector2(-1, 0), Vector2(1, 0), 0.02, ASPHALT, 0.04)
 
 
 func _lines() -> void:
 	# edge lines
-	_strip(-999.4, -999.05, 0.03, LINE)
-	_strip(999.05, 999.4, 0.03, LINE)
+	_strip(Vector2(-1, 0.6), Vector2(-1, 0.95), 0.03, LINE)
+	_strip(Vector2(1, -0.95), Vector2(1, -0.6), 0.03, LINE)
 	# dashed center line on wide sections
-	_strip(-0.18, 0.18, 0.03, LINE, 0.0, func(i: int) -> bool:
+	_strip(Vector2(0, -0.18), Vector2(0, 0.18), 0.03, LINE, 0.0, func(i: int) -> bool:
 		return (i / 3) % 2 == 0 and track.half_w[i] >= 8.5)
 	# red/white curbs on curves
 	var curvy := func(i: int) -> bool:
@@ -163,10 +159,10 @@ func _lines() -> void:
 		return curvy.call(i) and i % 2 == 0
 	var white_c := func(i: int) -> bool:
 		return curvy.call(i) and i % 2 == 1
-	_strip(-1000.0, -998.9, 0.035, Color("c7372c"), 0.0, red_c)
-	_strip(-1000.0, -998.9, 0.035, LINE, 0.0, white_c)
-	_strip(998.9, 1000.0, 0.035, Color("c7372c"), 0.0, red_c)
-	_strip(998.9, 1000.0, 0.035, LINE, 0.0, white_c)
+	_strip(Vector2(-1, 0), Vector2(-1, 1.1), 0.035, Color("c7372c"), 0.0, red_c)
+	_strip(Vector2(-1, 0), Vector2(-1, 1.1), 0.035, LINE, 0.0, white_c)
+	_strip(Vector2(1, -1.1), Vector2(1, 0), 0.035, Color("c7372c"), 0.0, red_c)
+	_strip(Vector2(1, -1.1), Vector2(1, 0), 0.035, LINE, 0.0, white_c)
 
 
 func _multimesh(mesh: Mesh, count: int, colors: bool) -> MultiMeshInstance3D:
@@ -179,6 +175,7 @@ func _multimesh(mesh: Mesh, count: int, colors: bool) -> MultiMeshInstance3D:
 	mi.multimesh = mm
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = colors
+	m.vertex_color_is_srgb = colors
 	m.roughness = 0.9
 	mi.material_override = m
 	return mi
@@ -229,7 +226,7 @@ func _chevrons() -> void:
 			var t := track.tans[i]
 			var r := TrackData.right_of(t)
 			var outside := -signf(c)   # right turn (c > 0) → outside is left (−)
-			var p: Vector2 = track.pts[i] + r * outside * (track.half_w[i] + 1.5)
+			var p: Vector2 = track.pts[i] + r * outside * (track.half_w[i] + 2.6)
 			var node := Node3D.new()
 			node.position = Vector3(p.x, 0, p.y)
 			# board faces oncoming traffic, tilted back to read from the high camera
@@ -237,24 +234,24 @@ func _chevrons() -> void:
 			root.add_child(node)
 			var board := MeshInstance3D.new()
 			var bm := BoxMesh.new()
-			bm.size = Vector3(2.6, 1.5, 0.15)
+			bm.size = Vector3(3.2, 1.9, 0.15)
 			board.mesh = bm
 			board.material_override = board_mat
-			board.position = Vector3(0, 1.15, 0)
-			board.rotation.x = -0.6
+			board.position = Vector3(0, 1.0, 0)
+			board.rotation.x = -1.1   # tilted back so the face reads from the high camera
 			node.add_child(board)
-			# chevron ">" pointing toward the turn direction (in board local X)
-			var dir := signf(c)   # board faces -travel, so local +X is world right of driver mirrored
+			# ">" pointing into the turn. Board local +X = driver's right.
+			var dir := signf(c)       # + = right turn
 			for k in [-1.0, 1.0]:
 				var bar := MeshInstance3D.new()
 				var sb := BoxMesh.new()
-				sb.size = Vector3(0.95, 0.24, 0.05)
+				sb.size = Vector3(1.35, 0.34, 0.05)
 				bar.mesh = sb
 				bar.material_override = chev_mat
-				bar.position = Vector3(-dir * 0.0, k * 0.3, -0.1)
-				bar.rotation.z = k * dir * 0.7
+				bar.position = Vector3(0, k * 0.42, 0.1)
+				bar.rotation.z = -k * dir * 0.7
 				board.add_child(bar)
-			i += 6
+			i += 5
 		else:
 			i += 1
 

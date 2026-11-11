@@ -1,0 +1,19 @@
+CANYON CLASH v0.1 (Windows x86-64, offline)
+
+Run: unzip anywhere and start CanyonClash.exe. No installer, no network.
+Needs a GPU with OpenGL 3.3 (Godot Compatibility renderer).
+Progress is saved to %APPDATA%\Godot\app_userdata\Canyon Clash\profile.json
+(plus profile.bak.json as the last valid backup).
+
+CONTROLS            Keyboard            Xbox gamepad
+Throttle            W / Up              RT
+Brake / reverse     S / Down            LT
+Steer               A D / Left Right    Left stick
+Handbrake (drift)   Space               A
+Fire                J                   RB
+Reset car           R                   Y
+Pause               Esc                 Menu
+Menus: mouse, arrows/D-pad/left stick, Enter/A select, Esc/B back.
+F11 fullscreen, F3 FPS counter.
+
+Win by crossing the line first after 3 laps, or by being the last car running.

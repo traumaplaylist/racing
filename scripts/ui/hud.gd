@@ -19,6 +19,7 @@ var count_l: Label
 var msg_l: Label
 var hint_l: Label
 var hit_l: Label
+var fps_l: Label
 var dmg_flash: ColorRect
 var pause_root: Control
 var _msg_t := 0.0
@@ -135,6 +136,12 @@ func _build() -> void:
 	_anchor(hint_l, Control.PRESET_CENTER_BOTTOM, 30)
 	hint_l.grow_horizontal = Control.GROW_DIRECTION_BOTH
 
+	fps_l = UiKit.label("", 18, UiKit.TEXT, 4)
+	fps_l.visible = false
+	root.add_child(fps_l)
+	_anchor(fps_l, Control.PRESET_TOP_RIGHT)
+	fps_l.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+
 	_build_pause(root)
 
 
@@ -183,6 +190,8 @@ func set_paused(on: bool) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_fps"):
+		fps_l.visible = not fps_l.visible
 	if event.is_action_pressed("pause"):
 		set_paused(not get_tree().paused)
 		get_viewport().set_input_as_handled()
@@ -227,6 +236,8 @@ func _process(delta: float) -> void:
 	UiKit.set_bar(boost_bar, p.boost_t / Cfg.BOOST_TIME)
 	speed_l.text = "%d %s" % [roundi(absf(p.vf) * 3.6), Loc.t("hud_kmh")]
 
+	if fps_l.visible:
+		fps_l.text = "%d FPS  %.1f ms" % [Engine.get_frames_per_second(), 1000.0 / maxf(1.0, Engine.get_frames_per_second())]
 	if race.phase == RaceManager.Phase.COUNTDOWN:
 		count_l.text = str(ceili(race.countdown))
 	else:

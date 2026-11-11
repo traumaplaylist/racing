@@ -17,7 +17,10 @@ var autopilot := false     # used for the player in debug/automated tests
 
 var _lat := 0.0
 var _stuck_t := 0.0
-var _wrong_t := 0.0
+var _reverse_t := 0.0
+var _prog := 0.0
+var _prog_t := 0.0
+var _last_s := -1.0
 var _rng := RandomNumberGenerator.new()
 var _want_boost := true
 # trigger discipline: react, fire a burst, then hold fire for a while
@@ -97,23 +100,37 @@ func update(dt: float) -> void:
 
 	# ---- stuck / wrong way → same reset the player uses
 	if race.is_racing():
-		if spd < 1.5:
-			_stuck_t += dt
-		else:
-			_stuck_t = maxf(0.0, _stuck_t - dt * 2.0)
-		if car.forward().dot(track.tangent_at(car.s)) < -0.3:
-			_wrong_t += dt
-		else:
-			_wrong_t = 0.0
-		if _stuck_t > 2.5 or _wrong_t > 3.0:
-			if race.request_reset(car):
-				_stuck_t = 0.0
-				_wrong_t = 0.0
-		# blocked against something: try reversing out briefly
-		if _stuck_t > 1.0 and _stuck_t < 2.2:
-			car.throttle = 0.0
-			car.brake = 1.0
-			car.steer = -car.steer
+		_unstick(dt, spd)
+
+
+## Progress-based: if the car gains < 4 m of track in 3 s it requests the shared reset.
+## Short reverse manoeuvres first try to free it from a wall.
+func _unstick(dt: float, spd: float) -> void:
+	if _last_s < 0.0:
+		_last_s = car.s
+	_prog += track.delta_s(_last_s, car.s)
+	_last_s = car.s
+	_prog_t += dt
+	if _prog_t >= 3.0:
+		if _prog < 4.0:
+			race.request_reset(car)
+			_reverse_t = 0.0
+		_prog = 0.0
+		_prog_t = 0.0
+	if _reverse_t > 0.0:
+		_reverse_t -= dt
+		car.throttle = 0.0
+		car.brake = 1.0
+		car.steer = -car.steer
+		car.handbrake = false
+		return
+	if spd < 1.5 and car.throttle > 0.5:
+		_stuck_t += dt
+		if _stuck_t > 0.8:
+			_stuck_t = 0.0
+			_reverse_t = 1.0
+	else:
+		_stuck_t = 0.0
 
 
 func _pickup_line(target: float, hw: float) -> float:

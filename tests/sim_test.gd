@@ -71,6 +71,7 @@ func run() -> void:
 	t_weapons()
 	t_pickups()
 	t_timeout()
+	t_bot_unstuck()
 	t_profile()
 	print("\nRESULT: %d passed, %d failed" % [passes, fails])
 	game.set_profile_name("test")
@@ -383,3 +384,28 @@ func t_profile() -> void:
 	game.select("bruiser", "pulse")
 	var txt := FileAccess.get_file_as_string(game.SAVE_PATH)
 	check(game.save_blocked and txt.contains("99"), "newer format not overwritten")
+
+
+func t_bot_unstuck() -> void:
+	var r := new_race()
+	run_countdown(r)
+	steps(r, 60 * 11)
+	var bot := r.cars[2]
+	# jam the bot nose-first into the barrier, facing backwards across the track
+	var s := bot.s
+	var t := r.track.tangent_at(s)
+	var side := TrackData.right_of(t)
+	var hw := r.track.half_width_at(s)
+	bot.place_at(r.track.point_at(s) + side * (hw - 2.5), TrackData.heading_of(-t) + 1.2)
+	var cps := bot.cps_passed
+	var reset_seen := false
+	for i in 60 * 8:
+		r.step(DT)
+		if bot.reset_cd > 0.0:
+			reset_seen = true
+			break
+	check(reset_seen or bot.forward().dot(r.track.tangent_at(bot.s)) > 0.5, "stuck bot recovers (reset or drives out)",
+		"reset=%s" % reset_seen)
+	steps(r, 60 * 12)
+	check(bot.cps_passed > cps, "bot keeps progressing after recovery", "%d -> %d" % [cps, bot.cps_passed])
+	r.queue_free()

@@ -32,6 +32,8 @@ func _ready() -> void:
 	_setup_input()
 	_parse_debug_args()
 	load_game()
+	if debug_flags.has("scene"):
+		_debug_start.call_deferred()
 
 
 # ---------------------------------------------------------------- profile
@@ -255,6 +257,40 @@ func set_profile_name(n: String) -> void:
 	TMP_PATH = "user://profile_%s.tmp.json" % n
 
 
+# ---------------------------------------------------------------- debug (debug builds only)
+
+var _shot_t := -1.0
+
+
+## --debug-scene=race|garage|results  --debug-shot=<secs>:<file.png>  --debug-autopilot
+## --debug-result=<reason>  (fake result for the results screen)
+func _debug_start() -> void:
+	var sc := str(debug_flags["scene"])
+	if debug_flags.has("result"):
+		last_result = {"id": "debug", "outcome": "win" if debug_flags["result"] in ["finished_first", "last_standing"] else "loss",
+			"reason": debug_flags["result"], "rival": "Viper", "place": 3, "player_finished": debug_flags["result"] == "finished_first",
+			"player_alive": debug_flags["result"] != "destroyed", "time": 165.4, "kills": 2,
+			"reward": Cfg.reward_for(str(debug_flags["result"])), "car": car_id, "weapon": weapon_id}
+		if debug_flags["result"] == "finished_first":
+			last_result["place"] = 1
+		last_result["id"] = "debug-%d" % Time.get_ticks_usec()
+		commit_result(last_result)
+	get_tree().change_scene_to_file("res://scenes/%s.tscn" % sc)
+
+
+func _process(delta: float) -> void:
+	if not debug_flags.has("shot"):
+		return
+	if _shot_t < 0.0:
+		_shot_t = float(str(debug_flags["shot"]).split(":")[0])
+	_shot_t -= delta
+	if _shot_t <= 0.0:
+		var path := str(debug_flags["shot"]).split(":")[1]
+		get_viewport().get_texture().get_image().save_png(path)
+		print("screenshot saved: ", path)
+		get_tree().quit()
+
+
 # ---------------------------------------------------------------- flow
 
 func goto_garage() -> void:
@@ -320,9 +356,11 @@ func _setup_input() -> void:
 	_bind("reset_car", [_key(KEY_R), _joy_btn(JOY_BUTTON_Y)])
 	_bind("pause", [_key(KEY_ESCAPE), _joy_btn(JOY_BUTTON_START)])
 	_bind("toggle_fullscreen", [_key(KEY_F11)])
+	_bind("toggle_fps", [_key(KEY_F3)])
 	# Menus: Godot's ui_* already have arrows, Enter, D-pad, A/B. Add the left stick.
 	_bind("ui_left", [_joy_axis(JOY_AXIS_LEFT_X, -1.0)])
 	_bind("ui_right", [_joy_axis(JOY_AXIS_LEFT_X, 1.0)])
 	_bind("ui_up", [_joy_axis(JOY_AXIS_LEFT_Y, -1.0)])
 	_bind("ui_down", [_joy_axis(JOY_AXIS_LEFT_Y, 1.0)])
+	_bind("ui_accept", [_joy_btn(JOY_BUTTON_A)])
 	_bind("ui_cancel", [_joy_btn(JOY_BUTTON_B)])

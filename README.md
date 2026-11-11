@@ -20,3 +20,6 @@ Canyon Clash — рабочее название одиночной аркадн
 | [ART_DIRECTION.md](ART_DIRECTION.md) | Камера, интерфейс и описание пяти концепт-скриншотов |
 
 Целевой стек при старте с нуля — Godot 4.x stable, GDScript и Compatibility. Windows-билд поставляется в ZIP с запускаемым приложением. Подготовка к Steam и Android заложена в технических требованиях к первому билду.
+## Состояние реализации
+
+v0.1 собран. Как собрать и проверить: [docs/BUILD.md](docs/BUILD.md). Статусы приёмки: [docs/ACCEPTANCE_REPORT.md](docs/ACCEPTANCE_REPORT.md). Происхождение ассетов: [ASSETS.md](ASSETS.md). Управление: [docs/PLAY.txt](docs/PLAY.txt).

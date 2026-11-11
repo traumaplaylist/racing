@@ -23,7 +23,7 @@
   "upgrade_cant_afford": "Need {0} CR",
   "start_race": "START RACE",
   "quit_game": "Quit",
-  "garage_hint": "Arrows / D-pad to move  ·  Enter / A to select  ·  Esc / B back",
+  "garage_hint": "Mouse, arrows or D-pad to move  ·  Enter / A to select  ·  F11 fullscreen",
   "hud_lap": "LAP {0}/{1}",
   "hud_pos": "POS {0}/{1}",
   "hud_rivals": "RIVALS LEFT {0}",
