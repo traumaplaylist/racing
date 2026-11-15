@@ -12,7 +12,7 @@ func _ready() -> void:
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(60, 60)
 	ground.mesh = pm
-	ground.material_override = MatLib.get_mat("Rock")
+	ground.material_override = MatLib.get_mat("Dark")
 	add_child(ground)
 	var list := str(args.get("view", "res://assets/models/car_buggy.glb,res://assets/models/car_bruiser.glb")).split(",")
 	var x := -3.0 * (list.size() - 1)
@@ -27,7 +27,7 @@ func _ready() -> void:
 	add_child(cam)
 	cam.fov = 40
 	var d := 8.0 + list.size() * 3.0
-	cam.look_at_from_position(Vector3(0, d * 0.5, float(args.get("camz", "-1")) * d), Vector3(0, 0.8, 0))
+	cam.look_at_from_position(Vector3(0, d * float(args.get("camh", "0.5")), float(args.get("camz", "-1")) * d), Vector3(0, 0.8, 0))
 	cam.current = true
 func _process(_d: float) -> void:
 	frames += 1

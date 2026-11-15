@@ -53,22 +53,22 @@ func build(car_type: String, color: Color, h_offset: float, weapon_id := "blaste
 	add_child(ring)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
-	var kinds := ["cliff", "rock_mesa", "rock_spire", "cliff"]
-	for i in 22:
-		var a := lerpf(-2.3, 2.3, i / 21.0) + rng.randf_range(-0.05, 0.05)
-		var d := rng.randf_range(28, 55)
+	var kinds := ["cliff", "rock_mesa", "cliff_b", "rock_spire"]
+	for i in 18:
+		var a := lerpf(-1.9, 1.9, i / 17.0) + rng.randf_range(-0.05, 0.05)
+		var d := rng.randf_range(48, 85)
 		var rock: Node3D = load("res://assets/models/%s.glb" % kinds[i % 4]).instantiate()
 		MatLib.apply(rock)
-		var sc := rng.randf_range(6, 12)
-		rock.scale = Vector3(sc, sc * rng.randf_range(1.0, 2.0), sc)
-		rock.position = Vector3(sin(a) * d, -0.5, -cos(a) * d)
-		rock.rotation.y = rng.randf() * TAU
+		var sc := rng.randf_range(5, 9)
+		rock.scale = Vector3(sc, sc * rng.randf_range(1.1, 2.0), sc)
+		rock.position = Vector3(sin(a) * d, -0.3, -cos(a) * d)
+		rock.rotation.y = -a   # long axis across the view, like a canyon wall
 		add_child(rock)
 	for i in 8:
 		var b: Node3D = load("res://assets/models/%s.glb" % ["rock_boulder", "bush", "stones", "barrel"][i % 4]).instantiate()
 		MatLib.apply(b)
 		var a := rng.randf_range(-1.4, 1.4)
-		b.position = Vector3(sin(a) * rng.randf_range(8, 14), 0, -cos(a) * rng.randf_range(8, 14))
+		b.position = Vector3(sin(a) * rng.randf_range(9, 16), 0, -cos(a) * rng.randf_range(9, 16))
 		add_child(b)
 	turntable = Node3D.new()
 	turntable.position.y = 0.2

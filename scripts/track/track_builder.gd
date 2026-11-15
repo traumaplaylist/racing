@@ -27,8 +27,9 @@ static func build(parent: Node3D, p_track: TrackData, with_env := true) -> Node3
 	b._ground()
 	b._road()
 	b._lines()
+	b._sand_edges()
 	b._barriers()
-	b._chevrons()
+	b._road_arrows()
 	b._start_line()
 	b._canyon()
 	b._props()
@@ -76,6 +77,11 @@ static func add_environment(parent: Node3D) -> void:
 	env.fog_light_color = Color("e7b98c")
 	env.fog_density = 0.0009
 	env.fog_sky_affect = 0.2
+	env.volumetric_fog_enabled = true
+	env.volumetric_fog_density = 0.004
+	env.volumetric_fog_albedo = Color("f1c69a")
+	env.volumetric_fog_length = 160.0
+	env.volumetric_fog_anisotropy = 0.6
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.15
 	env.adjustment_contrast = 1.06
@@ -140,7 +146,7 @@ func _ground() -> void:
 ## Strip along the track between lateral offsets a and b, each Vector2(k, c) = k*half_width + c.
 ## UV: u = lateral metres / uv_tile, v = arc length / uv_tile.
 func _strip(a: Vector2, b: Vector2, y: float, mat: Material, color := Color.WHITE,
-		uv_tile := 8.0, filter := Callable(), alpha_fn := Callable()) -> MeshInstance3D:
+		uv_tile := 8.0, filter := Callable(), alpha_fn := Callable(), edge_w := 0.0) -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var n := track.count
@@ -168,7 +174,10 @@ func _strip(a: Vector2, b: Vector2, y: float, mat: Material, color := Color.WHIT
 				c.a = alpha_fn.call(v[3])
 			st.set_color(c)
 			st.set_normal(Vector3.UP)
-			st.set_uv(Vector2(float(v[1]) / uv_tile, float(v[2]) / uv_tile))
+			var uu := float(v[1]) / uv_tile
+			if edge_w > 0.0:
+				uu = (track.half_w[int(v[3])] - absf(float(v[1]))) / edge_w   # 0 at the road edge
+			st.set_uv(Vector2(uu, float(v[2]) / uv_tile))
 			var p: Vector2 = v[0]
 			st.add_vertex(Vector3(p.x, y, p.y))
 	st.generate_tangents()
@@ -193,6 +202,55 @@ func _road() -> void:
 	tm.roughness = 0.6
 	_strip(Vector2(-1, 1.0), Vector2(1, -1.0), 0.025, tm, Color.WHITE, 22.0, Callable(),
 		func(i: int) -> float: return clampf(0.25 + absf(track.curv[i]) * 25.0, 0.25, 0.9))
+
+
+## Sand blown onto the asphalt edges (alpha-blended, noisy inner border).
+func _sand_edges() -> void:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _tex("edge_sand")
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.roughness = 1.0
+	for side: float in [-1.0, 1.0]:
+		var a := Vector2(side, 0.0)
+		var b := Vector2(side, -side * 2.6)
+		if side > 0:
+			_strip(b, a, 0.045, m, Color.WHITE, 14.0, Callable(), Callable(), 2.6)
+		else:
+			_strip(a, b, 0.045, m, Color.WHITE, 14.0, Callable(), Callable(), 2.6)
+
+
+## Painted chevron arrows on the asphalt ahead of the sharper corners.
+func _road_arrows() -> void:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _tex("road_arrow")
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.roughness = 0.8
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var i := 0
+	var last := -1000
+	while i < track.count:
+		if absf(track.curv[i]) > 1.0 / 42.0 and i - last > 60:
+			last = i
+			var s := track.s_at[i] - 34.0
+			var c := track.point_at(s)
+			var t := track.tangent_at(s)
+			var r := TrackData.right_of(t)
+			c += r * signf(track.curv[i]) * 1.5
+			# texture chevrons point to +V: V grows along the travel direction
+			var quad := [[c - r * 2.6 - t * 5.5, Vector2(0, 0)], [c + r * 2.6 - t * 5.5, Vector2(1, 0)],
+				[c - r * 2.6 + t * 5.5, Vector2(0, 1)], [c + r * 2.6 + t * 5.5, Vector2(1, 1)]]
+			for k in [0, 2, 1, 1, 2, 3]:
+				var p: Vector2 = quad[k][0]
+				st.set_normal(Vector3.UP)
+				st.set_uv(quad[k][1])
+				st.add_vertex(Vector3(p.x, 0.04, p.y))
+		i += 1
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
 
 
 func _lines() -> void:
@@ -268,41 +326,33 @@ func _along(i: int, side: float, off: float) -> Vector2:
 
 
 func _barriers() -> void:
-	var items: Array = []
-	var seg := 3.6   # model is 4 m long: overlap so curves have no gaps
+	var plain: Array = []
+	var chev_l: Array = []   # default texture "<": right-side barrier, outside of a left turn
+	var chev_r: Array = []   # mirrored ">": left-side barrier, outside of a right turn
+	var seg := 3.9
 	var s := 0.0
-	while s < track.length:
-		var t := track.tangent_at(s + seg * 0.5)
+	var k := 0
+	while s < track.length - seg * 0.5:
+		var sm := s + seg * 0.5
+		var t := track.tangent_at(sm)
 		var h := TrackData.heading_of(t)
+		var c := track.curvature_at(sm)
 		for side: float in [-1.0, 1.0]:
-			var p := track.point_at(s + seg * 0.5) + TrackData.right_of(t) * side * (track.half_width_at(s) + 0.55)
+			var p := track.point_at(sm) + TrackData.right_of(t) * side * (track.half_width_at(sm) + 0.6)
 			var basis := Basis(Vector3.UP, h - PI * 0.5)
 			if side > 0:
-				basis = Basis(Vector3.UP, h + PI * 0.5)   # posts outside on both sides
-			items.append([s, Transform3D(basis.scaled(Vector3(1.02, 1.3, 1.0)), Vector3(p.x, 0.0, p.y))])
+				basis = Basis(Vector3.UP, h + PI * 0.5)   # road-facing side inwards on both sides
+			var item := [s, Transform3D(basis.scaled(Vector3(1.03, 1.0, 1.0)), Vector3(p.x, 0.0, p.y))]
+			var outside := absf(c) > 1.0 / 70.0 and side == -signf(c)
+			if outside and k % 2 == 0:
+				(chev_r if side < 0 else chev_l).append(item)
+			else:
+				plain.append(item)
 		s += seg
-	_instances(_prop_mesh("barrier"), items)
-
-
-## Chevron boards behind the barrier on the outside of curves, facing oncoming cars.
-func _chevrons() -> void:
-	var left: Array = []
-	var right: Array = []
-	var i := 0
-	while i < track.count:
-		var c := track.curv[i]
-		if absf(c) > 1.0 / 60.0:
-			var t := track.tans[i]
-			var outside := -signf(c)
-			var p := _along(i, outside, 2.8)
-			var tr := Transform3D(Basis(Vector3.UP, TrackData.heading_of(-t)).scaled(Vector3.ONE * 1.5), Vector3(p.x, 0, p.y))
-			# texture shows "<" (turn left); mirrored variant for right turns
-			(right if c > 0 else left).append([track.s_at[i], tr])
-			i += 6
-		else:
-			i += 1
-	_instances(_prop_mesh("chevron_board"), left)
-	_instances(_prop_mesh("chevron_board", "R"), right)
+		k += 1
+	_instances(_prop_mesh("barrier"), plain)
+	_instances(_prop_mesh("barrier_chevron"), chev_l)
+	_instances(_prop_mesh("barrier_chevron", "R"), chev_r)
 
 
 func _start_line() -> void:
@@ -366,39 +416,47 @@ func _rock_xf(p: Vector2, scale: Vector3, sink := 0.0) -> Transform3D:
 	return Transform3D(b, Vector3(p.x, -sink, p.y))
 
 
-## Canyon: low boulders near the barriers, mesas and cliffs further out, a tall rim far away.
-## Everything keeps clear of every road section (checked against the whole centerline).
+## Canyon: boulders near the barriers, sandstone walls running along the road, tall rim
+## far away. Every rock is checked against the whole centerline so nothing sits on the road.
 func _canyon() -> void:
-	var groups := {"rock_boulder": [], "rock_slab": [], "rock_mesa": [], "rock_spire": [], "cliff": []}
+	var groups := {"rock_boulder": [], "rock_slab": [], "rock_mesa": [], "rock_spire": [], "cliff": [], "cliff_b": []}
+	var elong := {"cliff": 2.4, "cliff_b": 1.8, "rock_mesa": 1.2, "rock_spire": 1.0}
 	var i := 0
 	while i < track.count:
 		var s := track.s_at[i]
+		var t := track.tans[i]
 		for side: float in [-1.0, 1.0]:
-			# near band: boulders/slabs, low enough not to hide the road
-			if rng.randf() < 0.55:
-				var off := rng.randf_range(3.5, 8.0)
+			if rng.randf() < 0.5:
+				var off := rng.randf_range(3.2, 7.5)
 				var p := _along(i, side, off)
-				var sc := rng.randf_range(1.2, 2.6)
-				if track.distance_to_road_edge(p) - sc * 1.2 > 2.8:
+				var sc := rng.randf_range(1.0, 2.2)
+				if track.distance_to_road_edge(p) - sc * 1.7 > 1.6:
 					var kind := "rock_boulder" if rng.randf() < 0.6 else "rock_slab"
-					groups[kind].append([s, _rock_xf(p, Vector3(sc, sc * rng.randf_range(0.7, 1.2), sc), 0.2)])
-			# mid band: canyon walls
-			if rng.randf() < 0.7:
-				var off := rng.randf_range(12.0, 34.0)
+					groups[kind].append([s, _rock_xf(p, Vector3(sc, sc * rng.randf_range(0.8, 1.3), sc), 0.05)])
+			if rng.randf() < 0.8:
+				var kind: String = ["cliff", "cliff_b", "rock_mesa", "cliff", "rock_spire", "cliff_b"][rng.randi() % 6]
+				var sc := rng.randf_range(4.5, 9.5)
+				var off := rng.randf_range(sc * 1.9 + 3.0, sc * 1.9 + 22.0)
 				var p := _along(i, side, off)
-				var sc := rng.randf_range(4.0, 9.0)
-				var clear := track.distance_to_road_edge(p) - sc * 1.3
-				if clear > 5.0:
-					var kind: String = ["rock_mesa", "cliff", "cliff", "rock_spire"][rng.randi() % 4]
-					var hs := clampf(sc * rng.randf_range(0.8, 1.6), 3.0, 4.0 + clear * 0.8)
-					groups[kind].append([s, _rock_xf(p, Vector3(sc, hs, sc), 0.5)])
+				var el: float = elong[kind]
+				var ok := true
+				for d: float in [-0.8, 0.0, 0.8]:
+					var q := p + t * d * sc * el
+					if track.distance_to_road_edge(q) - sc * 1.9 < 2.5:
+						ok = false
+						break
+				if ok:
+					var hs := sc * rng.randf_range(0.9, 1.6)
+					var yaw := TrackData.heading_of(t) - PI * 0.5 + rng.randf_range(-0.3, 0.3)
+					var b := Basis(Vector3.UP, yaw).scaled(Vector3(sc, hs, sc))
+					groups[kind].append([s, Transform3D(b, Vector3(p.x, -0.1, p.y))])
 		i += 4
-	# far rim
-	for k in 110:
-		var a := TAU * k / 110.0
-		var p := Vector2(130, 40) + Vector2(cos(a) * rng.randf_range(430, 520), sin(a) * rng.randf_range(440, 540))
-		var sc := rng.randf_range(25.0, 45.0)
-		groups["cliff" if k % 2 == 0 else "rock_mesa"].append([track.length + 1.0 + (k % 6) * CHUNK, _rock_xf(p, Vector3(sc, sc * rng.randf_range(0.8, 1.5), sc), 2.0)])
+	for k in 120:
+		var a := TAU * k / 120.0
+		var p := Vector2(130, 40) + Vector2(cos(a) * rng.randf_range(430, 540), sin(a) * rng.randf_range(440, 560))
+		var sc := rng.randf_range(22.0, 40.0)
+		var b := Basis(Vector3.UP, a + PI * 0.5).scaled(Vector3(sc, sc * rng.randf_range(0.9, 1.6), sc))
+		groups["cliff" if k % 2 == 0 else "cliff_b"].append([track.length + 1.0 + (k % 6) * CHUNK, Transform3D(b, Vector3(p.x, -1.0, p.y))])
 	for kind in groups:
 		_instances(_prop_mesh(kind), groups[kind])
 

@@ -206,8 +206,10 @@ func sync_visual(delta: float) -> void:
 	var pitch := clampf(-throttle * 0.03 + brake * 0.04, -0.05, 0.06) if alive else 0.15
 	model.animate(delta, steer if alive else 0.0, vf, roll, pitch)
 	if _dust:
-		var dusty := alive and (drift > 0.35 or (handbrake and speed() > 6.0))
-		_dust.emitting = dusty
+		var hard := drift > 0.35 or (handbrake and speed() > 6.0)
+		_dust.emitting = alive and (hard or speed() > 9.0)
+		_dust.scale_amount_max = 2.6 if hard else 1.3
+		_dust.initial_velocity_max = 5.0 if hard else 2.5
 	if hp_bar:
 		hp_bar.visible = alive
 		_hp_fill.scale.x = maxf(0.001, hp / max_hp)
@@ -216,8 +218,8 @@ func sync_visual(delta: float) -> void:
 
 func _make_dust() -> void:
 	_dust = CPUParticles3D.new()
-	_dust.amount = 40
-	_dust.lifetime = 0.9
+	_dust.amount = 28
+	_dust.lifetime = 1.1
 	_dust.emitting = false
 	_dust.position = Vector3(0, 0.25, -stats["length"] * 0.45)
 	_dust.direction = Vector3(0, 0.6, -1)
@@ -230,13 +232,15 @@ func _make_dust() -> void:
 	_dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 	_dust.emission_box_extents = Vector3(stats["width"] * 0.5, 0.1, 0.2)
 	var qm := QuadMesh.new()
-	qm.size = Vector2(1.2, 1.2)
+	qm.size = Vector2(2.0, 2.0)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.vertex_color_use_as_albedo = true
-	m.albedo_color = Color(0.86, 0.68, 0.48, 0.45)
+	m.albedo_color = Color(0.92, 0.76, 0.56, 0.5)
+	m.albedo_texture = Fx.puff()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	qm.material = m
 	_dust.mesh = qm
 	var grad := Gradient.new()

@@ -57,15 +57,27 @@ def corrugated(name, length, height, z0, waves, depth, material):
     return ob
 
 
-def barrier():
+def barrier(chevron=False):
+    """Heavy riveted steel plates on I-beam posts. Road side = -Y."""
     reset()
-    corrugated("Panel", 4.0, 0.95, 0.15, 7, 0.04, "Rust")
-    corrugated("PanelTop", 4.0, 0.12, 1.1, 7, 0.02, "Rust")
-    for x in (-1.95, 1.95):
-        box("Post", (0.14, 0.2, 1.35), (x, -0.08, 0.66), "Steel", bev=0.01)
-        box("Foot", (0.35, 0.45, 0.06), (x, -0.1, 0.03), "Steel")
-    box("Rail", (4.0, 0.08, 0.1), (0, -0.12, 0.95), "Steel")
-    out("barrier")
+    random.seed(11 if chevron else 5)
+    for i, x in enumerate((-1.0, 1.0)):
+        tilt = random.uniform(-0.035, 0.035)
+        box("Plate%d" % i, (2.06, 0.05, 1.3), (x, -0.02 * i, 0.72 + random.uniform(-0.03, 0.03)), "Rust", rot=(0, tilt, 0), bev=0.012)
+        for sx in (-0.92, -0.3, 0.3, 0.92):
+            for z in (0.2, 1.24):
+                cyl("Rivet", 0.035, 0.05, (x + sx, -0.05, z), "Steel", axis="Y", seg=6)
+        box("Rib%d" % i, (2.0, 0.06, 0.1), (x, -0.045, 0.72), "Steel", bev=0.01)
+    for x in (-2.0, 0.0):
+        box("PostWeb", (0.05, 0.24, 1.5), (x, 0.13, 0.75), "Steel")
+        for y in (0.02, 0.25):
+            box("PostFlange", (0.2, 0.03, 1.5), (x, y, 0.75), "Steel")
+        box("Brace", (0.06, 0.7, 0.06), (x, 0.45, 0.42), "Steel", rot=(0.75, 0, 0))
+        box("Foot", (0.4, 0.5, 0.05), (x, 0.2, 0.025), "Steel")
+    tube("TopRail", (-2.0, -0.02, 1.42), (2.0, -0.02, 1.42), 0.045, "Steel")
+    if chevron:
+        sign_quad("Paint", 3.7, 1.0, (0, -0.062, 0.74), "Sign")
+    out("barrier_chevron" if chevron else "barrier")
 
 
 def sign_quad(name, w, h, loc, material):
@@ -90,48 +102,107 @@ def chevron_board():
     out("chevron_board")
 
 
-def displaced(name, seed, size, scale, strength, flatten_top=None, subdiv=4):
-    bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=subdiv, radius=1.0)
+SAND_COL = (0.82, 0.60, 0.39, 1.0)
+
+
+def butte(name, seed, radius, height, layers, elong=1.0, roundness=0.0, top_noise=0.15, seg=56, rows_per_layer=3):
+    """Sandstone butte: polar mesh with stepped strata, vertical erosion flutes and a talus
+    skirt. Vertex colours: strata shading + sand colour at the base (blends into the ground)."""
     random.seed(seed)
-    off = Vector((random.random() * 100, random.random() * 100, random.random() * 100))
-    for v in bm.verts:
-        p = v.co.copy()
-        n = noise.fractal(p * scale + off, 0.6, 2.0, 4)
-        strata = math.sin((p.z * 6 + noise.noise(p * 2 + off) * 0.8) * math.pi) * 0.04
-        v.co = p * (1 + n * strength + strata)
-        v.co = Vector((v.co.x * size[0], v.co.y * size[1], v.co.z * size[2]))
-        if flatten_top is not None and v.co.z > flatten_top:
-            v.co.z = flatten_top + (v.co.z - flatten_top) * 0.08
-    # sit on the ground
-    minz = min(v.co.z for v in bm.verts)
-    for v in bm.verts:
-        v.co.z -= minz + 0.4
+    off = Vector((random.random() * 50, random.random() * 50, random.random() * 50))
+    # per-layer inset (terraces): hard caprock layers stick out, soft ones recede
+    insets = []
+    r = 1.0
+    for l in range(layers):
+        r = max(0.45, min(1.0, r + random.uniform(-0.16, 0.07)))
+        insets.append(r)
+    shade = [random.uniform(0.78, 1.08) for _ in range(layers)]
+    rows = []
+    cols = []
+    talus_h = 0.16
+    nz = layers * rows_per_layer
+    zs = [0.0, talus_h * 0.5, talus_h]
+    for k in range(nz + 1):
+        zs.append(talus_h + (1 - talus_h) * k / nz)
+    bm = bmesh.new()
+    col = bm.loops.layers.color.new("Col")
+    vcol = {}
+    for zi, zf in enumerate(zs):
+        ring = []
+        for k in range(seg):
+            a = 2 * math.pi * k / seg
+            d = Vector((math.cos(a), math.sin(a), 0))
+            low = noise.fractal(d * 1.3 + off, 0.7, 2.0, 3) * 0.28
+            flute = noise.fractal(Vector((math.cos(a) * 5, math.sin(a) * 5, zf * 0.6)) + off, 0.6, 2.2, 3) * 0.09
+            if zf < talus_h:
+                t = zf / talus_h
+                prof = 1.55 - 0.5 * t + noise.noise(d * 3 + off) * 0.08
+                c = [1.0, 1.0, 1.0]
+                alpha = t * t
+                flute *= t
+            else:
+                lf = (zf - talus_h) / (1 - talus_h) * layers
+                l = min(layers - 1, int(lf))
+                frac = lf - l
+                # slight overhang at the top of a layer, receding foot
+                prof = insets[l] * (1.0 - 0.05 * (1 - frac)) * (1 - roundness * ((zf - 0.55) * 1.6) ** 2)
+                crev = 0.75 if frac < 0.12 else 1.0
+                sh = shade[l] * crev * (0.92 + 0.16 * noise.noise(d * 4 + Vector((0, 0, zf * 9)) + off))
+                c = [sh, sh, sh]
+                alpha = 1.0
+            rad = radius * (1 + low) * (prof + flute)
+            v = bm.verts.new((d.x * rad * elong, d.y * rad, zf * height))
+            vcol[v] = (min(1.0, c[0] * 0.9), min(1.0, c[1] * 0.9), min(1.0, c[2] * 0.9), alpha)
+            ring.append(v)
+        rows.append(ring)
+    for a_, b_ in zip(rows[:-1], rows[1:]):
+        for k in range(seg):
+            bm.faces.new((a_[k], a_[(k + 1) % seg], b_[(k + 1) % seg], b_[k]))
+    # top cap: fan with a bumpy plateau
+    centre = bm.verts.new((0, 0, height * (1 + top_noise * 0.3)))
+    vcol[centre] = (0.95, 0.95, 0.95, 1.0)
+    inner = []
+    for k in range(seg):
+        v = rows[-1][k]
+        p = v.co * 0.55
+        p.z = height * (1 + top_noise * noise.noise(p * 0.2 + off) * 0.5)
+        w = bm.verts.new(p)
+        vcol[w] = (0.95, 0.95, 0.95, 1.0)
+        inner.append(w)
+    top = rows[-1]
+    for k in range(seg):
+        bm.faces.new((top[k], top[(k + 1) % seg], inner[(k + 1) % seg], inner[k]))
+        bm.faces.new((inner[k], inner[(k + 1) % seg], centre))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:
+        for loop in f.loops:
+            loop[col] = vcol[loop.vert]
     ob = new_obj(name, bm, "Rock")
-    for p in ob.data.polygons:
-        p.use_smooth = False
-    dec = ob.modifiers.new("Dec", "DECIMATE")
-    dec.ratio = 0.5
+    from blender_lib import smooth_sharp
+    smooth_sharp(ob, 32)
     return ob
 
 
 def rocks():
     specs = [
-        ("rock_boulder", 1, (1.0, 0.9, 0.75), 1.4, 0.35, None),
-        ("rock_slab", 2, (1.3, 1.0, 0.45), 1.2, 0.3, 0.3),
-        ("rock_mesa", 3, (1.0, 0.95, 1.4), 1.0, 0.25, 1.05),
-        ("rock_spire", 4, (0.6, 0.6, 1.9), 1.6, 0.3, 1.7),
-        ("cliff", 5, (2.6, 0.9, 1.3), 0.9, 0.28, 1.0),
+        # name, seed, radius, height, layers, elong, roundness
+        ("rock_boulder", 1, 1.0, 1.3, 2, 1.0, 0.9),
+        ("rock_slab", 2, 1.3, 0.8, 2, 1.4, 0.4),
+        ("rock_mesa", 3, 1.0, 1.5, 5, 1.2, 0.0),
+        ("rock_spire", 4, 0.55, 2.6, 7, 1.0, 0.15),
+        ("cliff", 5, 1.0, 1.7, 6, 2.4, 0.0),
+        ("cliff_b", 6, 1.0, 2.0, 7, 1.8, 0.05),
     ]
-    for name, seed, size, sc, st, flat in specs:
+    for name, seed, rad, h, layers, elong, rnd in specs:
         reset()
-        displaced(name, seed, size, sc, st, flat)
+        butte(name, seed, rad, h, layers, elong, rnd, seg=40 if layers <= 2 else 56)
         out(name)
     reset()
-    for i in range(5):
+    for i in range(6):
         random.seed(i)
-        o = displaced("stone%d" % i, 10 + i, (0.25, 0.2, 0.16), 2.0, 0.35, None, 2)
-        o.location = (random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5), 0.0)
+        o = butte("stone%d" % i, 10 + i, 0.22, 0.2, 1, random.uniform(1.0, 1.5), 1.0, seg=10, rows_per_layer=2)
+        o.location = (random.uniform(-1.6, 1.6), random.uniform(-1.6, 1.6), -0.02)
+        o.rotation_euler = (0, 0, random.uniform(0, 6.28))
     out("stones")
 
 
@@ -201,4 +272,4 @@ def pickups():
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    barrier(); chevron_board(); rocks(); crate(); barrel(); bush(); pickups()
+    barrier(); barrier(True); chevron_board(); rocks(); crate(); barrel(); bush(); pickups()

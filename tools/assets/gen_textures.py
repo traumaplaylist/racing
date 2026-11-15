@@ -182,9 +182,42 @@ def chevron_sign():
     col = base * (1 - chev[..., None]) + light * chev[..., None]
     col = col * (1 - border[..., None]) + np.array([0.18, 0.16, 0.15]) * border[..., None]
     col *= (0.8 + 0.2 * grime_n)[..., None]
+    # sun-faded paint worn through to rust
+    wear = np.clip((noise(N, 5, 61, 5)[:h, :w] - 0.5) * 3.2, 0, 1)
+    pits = noise(N, 80, 62, 2)[:h, :w]
+    rustc = colorize(pits, [(0, (86, 40, 22)), (0.5, (132, 62, 30)), (1, (168, 90, 46))])
+    col = col * (1 - wear[..., None] * 0.8) + rustc * wear[..., None] * 0.8
     img = Image.fromarray((np.clip(col, 0, 1) * 255).astype(np.uint8), "RGB")
     img.save(os.path.join(OUT, "chevron_sign.png"))
     print("wrote chevron_sign.png")
+
+
+def edge_sand():
+    """Sand drifting onto the asphalt edge. U across (0 = road edge, 1 = towards centre)."""
+    u = np.linspace(0, 1, N)[None, :]
+    n1 = noise(N, 6, 80, 5)
+    n2 = noise(N, 40, 81, 3)
+    a = np.clip(1.25 - u * 1.9 + (n1 - 0.5) * 1.1 + (n2 - 0.5) * 0.35, 0, 1) ** 1.5
+    rgba = np.zeros((N, N, 4))
+    sandc = colorize(noise(N, 60, 82, 3), [(0, (186, 126, 78)), (1, (222, 168, 112))])
+    rgba[..., :3] = sandc
+    rgba[..., 3] = a * 0.92
+    Image.fromarray((rgba * 255).astype(np.uint8), "RGBA").save(os.path.join(OUT, "edge_sand.png"))
+    print("wrote edge_sand.png")
+
+
+def road_arrow():
+    """Painted chevron arrows for the asphalt (RGBA, points to +V)."""
+    n = 512
+    yy, xx = np.mgrid[0:n, 0:n] / n
+    v = (yy * 3.0 + np.abs(xx - 0.5) * 1.3) % 1.0
+    a = ((v < 0.32) & (np.abs(xx - 0.5) < 0.42)).astype(np.float64)
+    wear = np.clip(noise(n, 10, 90, 4) * 1.6 - 0.25, 0, 1)
+    rgba = np.zeros((n, n, 4))
+    rgba[..., :3] = np.array([0.93, 0.9, 0.82])
+    rgba[..., 3] = a * wear
+    Image.fromarray((rgba * 255).astype(np.uint8), "RGBA").save(os.path.join(OUT, "road_arrow.png"))
+    print("wrote road_arrow.png")
 
 
 def wood():
@@ -199,4 +232,4 @@ def wood():
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    asphalt(); tire_marks(); sand(); rock(); rust_metal(); grime(); chevron_sign(); wood()
+    asphalt(); tire_marks(); sand(); rock(); rust_metal(); grime(); chevron_sign(); wood(); edge_sand(); road_arrow()

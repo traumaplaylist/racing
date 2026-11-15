@@ -24,6 +24,13 @@ static func _tri(m: StandardMaterial3D, scale: float, world := false) -> void:
 static func get_mat(name: String) -> Material:
 	if _cache.has(name):
 		return _cache[name]
+	if name == "Rock":
+		var sm := ShaderMaterial.new()
+		sm.shader = load("res://assets/shaders/rock.gdshader")
+		sm.set_shader_parameter("rock_tex", tex("rock_albedo"))
+		sm.set_shader_parameter("sand_tex", tex("sand_albedo"))
+		_cache[name] = sm
+		return sm
 	var m := StandardMaterial3D.new()
 	match name:
 		"Stripe":
@@ -45,8 +52,8 @@ static func get_mat(name: String) -> Material:
 			m.roughness_texture = tex("grime_rough")
 			_tri(m, 1.0)
 		"Rubber":
-			m.albedo_color = Color("1e1c1b")
-			m.roughness = 0.92
+			m.albedo_color = Color("100f0f")
+			m.roughness = 0.95
 		"Rim":
 			m.albedo_color = Color("7a7d80")
 			m.metallic = 0.8
@@ -61,8 +68,8 @@ static func get_mat(name: String) -> Material:
 		"LightFront":
 			m.albedo_color = Color("fff6dc")
 			m.emission_enabled = true
-			m.emission = Color("fff1c8")
-			m.emission_energy_multiplier = 2.5
+			m.emission = Color("fffbf0")
+			m.emission_energy_multiplier = 4.0
 		"LightRear":
 			m.albedo_color = Color("ff3a20")
 			m.emission_enabled = true
@@ -129,8 +136,11 @@ static func paint(c: Color) -> StandardMaterial3D:
 	m.albedo_color = c
 	m.albedo_texture = tex("grime_albedo")
 	m.roughness_texture = tex("grime_rough")
-	m.metallic = 0.25
-	m.roughness = 1.0
+	m.metallic = 0.45
+	m.roughness = 0.8
+	m.clearcoat_enabled = true
+	m.clearcoat = 0.9
+	m.clearcoat_roughness = 0.12
 	_tri(m, 0.9)
 	return m
 

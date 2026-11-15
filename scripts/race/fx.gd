@@ -2,6 +2,26 @@ class_name Fx
 extends RefCounted
 ## Short-lived visual effects. Particle counts are kept small (mobile-friendly).
 
+static var _puff: Texture2D
+
+
+## Soft round sprite shared by dust, sparks and smoke.
+static func puff() -> Texture2D:
+	if _puff == null:
+		var g := Gradient.new()
+		g.set_color(0, Color(1, 1, 1, 1))
+		g.set_color(1, Color(1, 1, 1, 0))
+		g.add_point(0.45, Color(1, 1, 1, 0.55))
+		var t := GradientTexture2D.new()
+		t.gradient = g
+		t.fill = GradientTexture2D.FILL_RADIAL
+		t.fill_from = Vector2(0.5, 0.5)
+		t.fill_to = Vector2(1.0, 0.5)
+		t.width = 64
+		t.height = 64
+		_puff = t
+	return _puff
+
 
 static func burst(parent: Node, pos: Vector3, color: Color, amount: int, speed: float, size: float, life := 0.5) -> void:
 	var p := CPUParticles3D.new()
@@ -23,6 +43,7 @@ static func burst(parent: Node, pos: Vector3, color: Color, amount: int, speed: 
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.vertex_color_use_as_albedo = true
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_texture = puff()
 	qm.material = m
 	p.mesh = qm
 	var g := Gradient.new()

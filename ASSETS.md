@@ -6,7 +6,7 @@
 |---|---|---|
 | Машины Buggy и Bruiser, турели Blaster и Pulse, ограждения, щиты-шевроны, скалы, ящики, бочки, кусты, бонусы (`assets/models/*.glb`) | Скриптовое моделирование в Blender 5.3 (`bpy`): `tools/assets/make_cars.py`, `tools/assets/make_props.py` | Код проекта |
 | PBR-текстуры: асфальт, песок, песчаник, ржавчина, грязь, дерево, следы шин, щит-шеврон (`assets/textures/*.png`) | Процедурная генерация: `tools/assets/gen_textures.py` (numpy + Pillow) | Код проекта |
-| Материалы | `scripts/race/mat_lib.gd`: модели несут только имена материалов, Godot подставляет PBR-материалы по имени | Код проекта |
+| Материалы | `scripts/race/mat_lib.gd`: модели несут только имена материалов, Godot подставляет PBR-материалы по имени. Скалы — шейдер `assets/shaders/rock.gdshader` (слои по мировой высоте, песок у подножия) | Код проекта |
 | Звуки | Синтез в рантайме (`scripts/autoload/sfx.gd`, `scripts/race/engine_audio.gd`) | Код проекта |
 | Шрифт | Встроенный шрифт Godot (Open Sans) | SIL OFL 1.1, поставляется с движком |
 | Движок | Godot Engine 4.5.1 | MIT |

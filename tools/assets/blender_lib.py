@@ -147,5 +147,174 @@ def wheel(name, r, w, loc, parent=None, lugs=22):
 def export_glb(path):
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=False,
                               export_apply=True, export_yup=True, export_materials="EXPORT",
-                              export_texcoords=True, export_normals=True)
+                              export_texcoords=True, export_normals=True,
+                              export_vertex_color="ACTIVE", export_all_vertex_colors=True)
     print("exported", path)
+
+
+# ---------------------------------------------------------------------------- v2 helpers
+
+def smooth_sharp(ob, angle=38):
+    """Smooth shading with hard edges above `angle` (Blender >= 4.1)."""
+    me = ob.data
+    for p in me.polygons:
+        p.use_smooth = True
+    try:
+        me.set_sharp_from_angle(angle=math.radians(angle))
+    except Exception:
+        pass
+    return ob
+
+
+def apply_modifiers(ob):
+    for o in bpy.context.scene.objects:
+        o.select_set(False)
+    ob.select_set(True)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.convert(target="MESH")
+    return ob
+
+
+def lathe(name, profile, material, seg=32, parent=None, close=False, angle=30):
+    """Revolve (radius, x) profile around the X axis."""
+    bm = bmesh.new()
+    rings = []
+    for k in range(seg):
+        a = 2 * math.pi * k / seg
+        rings.append([bm.verts.new((x, math.cos(a) * r, math.sin(a) * r)) for (r, x) in profile])
+    n = len(profile)
+    for k in range(seg):
+        a, b = rings[k], rings[(k + 1) % seg]
+        for i in range(n - 1):
+            bm.faces.new((a[i], a[i + 1], b[i + 1], b[i]))
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = new_obj(name, bm, material, parent)
+    smooth_sharp(ob, angle)
+    return ob
+
+
+def body_loft(name, stations, parent=None, stripe_hw=0.26, subsurf=2, two_tone=True, mats=("Paint", "Stripe", "Dark"), crease=0.0):
+    """Subdivision car hull. stations: (y, half_w, z_bottom, z_belt, z_top, top_half_w).
+    Ring: 10 points; centre top faces get the Stripe material, the rocker band gets Dark."""
+    bm = bmesh.new()
+    rings = []
+    for (y, w, zb, zbelt, zt, wt) in stations:
+        sh = min(stripe_hw, wt * 0.6)
+        pts = [(-w * 0.82, zb), (w * 0.82, zb), (w, zb + 0.13), (w, zbelt), (wt, zt), (sh, zt + 0.015),
+               (-sh, zt + 0.015), (-wt, zt), (-w, zbelt), (-w, zb + 0.13)]
+        rings.append([bm.verts.new((x, y, z)) for (x, z) in pts])
+    n = 10
+    faces_stripe, faces_dark = [], []
+    for a, b in zip(rings[:-1], rings[1:]):
+        for i in range(n):
+            f = bm.faces.new((a[i], a[(i + 1) % n], b[(i + 1) % n], b[i]))
+            if i == 5:
+                faces_stripe.append(f)
+            if two_tone and i in (0, 1, 9):
+                faces_dark.append(f)
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    if crease > 0:
+        # character lines: crease the belt and roof-edge rails, and the end caps
+        layer = bm.edges.layers.float.new("crease_edge")
+        bm.edges.ensure_lookup_table()
+        for a, b in zip(rings[:-1], rings[1:]):
+            for i in (2, 3, 4, 7, 8, 9):
+                e = bm.edges.get((a[i], b[i]))
+                if e:
+                    e[layer] = crease
+        for ring in (rings[0], rings[-1]):
+            for i in range(n):
+                e = bm.edges.get((ring[i], ring[(i + 1) % n]))
+                if e:
+                    e[layer] = crease
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in faces_stripe:
+        f.material_index = 1
+    for f in faces_dark:
+        f.material_index = 2
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for m in mats:
+        me.materials.append(mat(m))
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    ob.parent = parent
+    if subsurf:
+        md = ob.modifiers.new("Sub", "SUBSURF")
+        md.levels = subsurf
+        md.render_levels = subsurf
+    return ob
+
+
+def cut_wheel_wells(body, wells, r, depth=0.75):
+    """Boolean-cut cylinders (axis X) out of the hull at (x, y, z) centres."""
+    cutters = []
+    for i, (x, y, z) in enumerate(wells):
+        c = cyl("cut%d" % i, r, depth, (x, y, z), "Dark", axis="X", seg=28)
+        md = body.modifiers.new("Well%d" % i, "BOOLEAN")
+        md.operation = "DIFFERENCE"
+        md.object = c
+        cutters.append(c)
+    apply_modifiers(body)
+    for c in cutters:
+        bpy.data.objects.remove(c)
+    smooth_sharp(body, 42)
+    return body
+
+
+def arch_flare(name, centre, r, width, thick, material, parent=None, a0=-15, a1=195, side=1):
+    """Fender flare: rectangular profile swept over the wheel (in the YZ plane)."""
+    bm = bmesh.new()
+    rings = []
+    steps = 14
+    cx, cy, cz = centre
+    for k in range(steps + 1):
+        a = math.radians(a0 + (a1 - a0) * k / steps)
+        ring = []
+        for (dr, dx) in ((0, 0), (thick, 0), (thick * 0.7, side * width), (0, side * width)):
+            rr = r + dr
+            ring.append(bm.verts.new((cx + dx, cy + math.cos(a) * rr, cz + math.sin(a) * rr)))
+        rings.append(ring)
+    for a, b in zip(rings[:-1], rings[1:]):
+        for i in range(4):
+            bm.faces.new((a[i], a[(i + 1) % 4], b[(i + 1) % 4], b[i]))
+    bm.faces.new(rings[0])
+    bm.faces.new(list(reversed(rings[-1])))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = new_obj(name, bm, material, parent)
+    smooth_sharp(ob, 50)
+    return ob
+
+
+def wheel2(name, r, w, loc, parent=None, lugs=20):
+    """Off-road wheel v2: lathed tyre with chunky tread, dished rim with spokes."""
+    side = 1 if loc[0] > 0 else -1
+    tyre = lathe(name, [(r * 0.6, -w * 0.46), (r * 0.8, -w * 0.5), (r * 0.94, -w * 0.46), (r * 0.985, -w * 0.3),
+                        (r * 0.985, w * 0.3), (r * 0.94, w * 0.46), (r * 0.8, w * 0.5), (r * 0.6, w * 0.46)],
+                 "Rubber", seg=36, parent=parent)
+    tyre.location = loc
+    bm = bmesh.new()
+    for i in range(lugs):
+        a = 2 * math.pi * i / lugs
+        for s in (-1, 1):
+            lug = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+            bmesh.ops.scale(bm, vec=Vector((w * 0.44, 0.105, r * 0.11)), verts=lug)
+            bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=Matrix.Rotation(0.42 * s, 3, "Z"), verts=lug)
+            bmesh.ops.translate(bm, vec=Vector((s * w * 0.25, 0, r * 0.99)), verts=lug)
+            bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=Matrix.Rotation(a + s * math.pi / lugs, 3, "X"), verts=lug)
+    new_obj(name + "_tread", bm, "Rubber", tyre)
+    # rim: outer dish + inner cover
+    lathe(name + "_rim", [(r * 0.62, side * w * 0.47), (r * 0.6, side * w * 0.5), (r * 0.54, side * w * 0.5),
+                          (r * 0.5, side * w * 0.3), (r * 0.2, side * w * 0.26), (r * 0.16, side * w * 0.36),
+                          (0.0, side * w * 0.36)], "Rim", seg=24, parent=tyre)
+    lathe(name + "_back", [(r * 0.62, -side * w * 0.4), (0.0, -side * w * 0.4)], "Dark", seg=16, parent=tyre)
+    for k in range(5):
+        a = 2 * math.pi * k / 5
+        box(name + "_spoke%d" % k, (0.06, r * 0.36, 0.1), (side * w * 0.33, math.cos(a) * r * 0.35, math.sin(a) * r * 0.35),
+            "Steel", rot=(a, 0, 0), parent=tyre, bev=0.012)
+        cyl(name + "_nut%d" % k, 0.022, 0.04, (side * w * 0.37, math.cos(a + 0.6) * r * 0.1, math.sin(a + 0.6) * r * 0.1),
+            "Steel", seg=6, parent=tyre)
+    return tyre
