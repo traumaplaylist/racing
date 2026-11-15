@@ -2,7 +2,8 @@
 
 ## Стек
 
-- **Godot 4.5.1-stable** (`4.5.1.stable.official.f62fdbde1`), GDScript, рендерер **Compatibility** (OpenGL 3.3).
+- **Godot 4.5.1-stable** (`4.5.1.stable.official.f62fdbde1`), GDScript.
+- Рендерер **Forward+** (Vulkan, на Windows откат на D3D12, затем на OpenGL 3.3, если Vulkan недоступен). Для будущего Android задан рендерер **Mobile** (`rendering_method.mobile`). SSAO, glow и цветокоррекция в Mobile и Compatibility отключаются сами.
 - Шаблоны экспорта той же версии: `Godot_v4.5.1-stable_export_templates.tpz` с github.com/godotengine/godot/releases.
   Распаковать содержимое `templates/` в
   - Linux: `~/.local/share/godot/export_templates/4.5.1.stable/`
@@ -24,6 +25,21 @@ tools/build_windows.sh
 godot --headless --import
 godot --headless --export-release "Windows Desktop" build/windows/CanyonClash.exe
 ```
+
+## Ассеты (Blender)
+
+Модели и текстуры закоммичены, поэтому для сборки игры Blender не нужен. Пересобрать их:
+
+```bash
+uv venv -p 3.13 .venv-assets && VIRTUAL_ENV=.venv-assets uv pip install bpy==5.3.0 pillow
+.venv-assets/bin/python tools/assets/gen_textures.py   # assets/textures/*.png
+.venv-assets/bin/python tools/assets/make_cars.py      # assets/models/car_*.glb
+.venv-assets/bin/python tools/assets/make_props.py     # assets/models/<prop>.glb
+godot --headless --import
+```
+
+`bpy` — это Blender как Python-модуль, отдельная установка Blender не требуется. Просмотр моделей с игровыми материалами:
+`godot res://tests/model_view.tscn -- --view=res://assets/models/car_buggy.glb`.
 
 ## Тесты
 

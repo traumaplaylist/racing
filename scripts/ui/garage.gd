@@ -19,7 +19,7 @@ var start_btn: Button
 func _ready() -> void:
 	show = Showroom.new()
 	add_child(show)
-	show.build(Game.car_id, RaceManager.PLAYER_COLOR, 3.2)
+	show.build(Game.car_id, RaceManager.PLAYER_COLOR, 3.2, Game.weapon_id)
 	_build_ui()
 	_refresh()
 	start_btn.grab_focus()
@@ -186,7 +186,7 @@ func _refresh() -> void:
 func _pick_car(cid: String) -> void:
 	if not Game.select(cid, Game.weapon_id):
 		_show_error(Game.save_error, true)
-	show.set_car(Game.car_id, RaceManager.PLAYER_COLOR)
+	show.set_car(Game.car_id, RaceManager.PLAYER_COLOR, Game.weapon_id)
 	Sfx.play("ui_ok")
 	_refresh()
 
@@ -194,6 +194,7 @@ func _pick_car(cid: String) -> void:
 func _pick_weapon(wid: String) -> void:
 	if not Game.select(Game.car_id, wid):
 		_show_error(Game.save_error, true)
+	show.car.set_weapon(Game.weapon_id)
 	Sfx.play("ui_ok")
 	_refresh()
 

@@ -54,12 +54,12 @@ func _build() -> void:
 	root.add_child(dmg_flash)
 
 	# top-left: lap, position, rivals left
-	var tl := UiKit.panel()
+	var tl := UiKit.hud_panel()
 	var tlv := VBoxContainer.new()
 	tlv.add_theme_constant_override("separation", 0)
 	tl.add_child(tlv)
-	lap_l = UiKit.label("", 34)
-	pos_l = UiKit.label("", 30, UiKit.ACCENT)
+	lap_l = UiKit.label("", 34, UiKit.TEXT, 4)
+	pos_l = UiKit.label("", 40, UiKit.ACCENT, 4)
 	rivals_l = UiKit.label("", 22, UiKit.WARM)
 	time_l = UiKit.label("", 20, UiKit.DIM)
 	for l in [lap_l, pos_l, rivals_l, time_l]:
@@ -68,11 +68,11 @@ func _build() -> void:
 	_anchor(tl, Control.PRESET_TOP_LEFT)
 
 	# bottom-left: HP
-	var bl := UiKit.panel()
+	var bl := UiKit.hud_panel(UiKit.GOOD)
 	var blv := VBoxContainer.new()
 	bl.add_child(blv)
 	var hrow := HBoxContainer.new()
-	hrow.add_child(UiKit.label(Loc.t("hud_hp"), 22, UiKit.DIM))
+	hrow.add_child(UiKit.label("✚ " + Loc.t("hud_hp"), 24, UiKit.GOOD))
 	hp_l = UiKit.label("", 34)
 	hp_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hp_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -84,7 +84,7 @@ func _build() -> void:
 	_anchor(bl, Control.PRESET_BOTTOM_LEFT)
 
 	# bottom-right: weapon readiness, boost timer, speed
-	var br := UiKit.panel()
+	var br := UiKit.hud_panel()
 	var brv := VBoxContainer.new()
 	br.add_child(brv)
 	var wrow := HBoxContainer.new()

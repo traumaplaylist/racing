@@ -31,6 +31,19 @@ static func panel(color := BG) -> PanelContainer:
 	return p
 
 
+## Slanted HUD plate with an accent edge (in-race look from the concept art).
+static func hud_panel(accent := ACCENT) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := box(Color(0.06, 0.07, 0.08, 0.78), 6)
+	sb.skew = Vector2(0.22, 0)
+	sb.border_width_left = 6
+	sb.border_color = accent
+	sb.content_margin_left = 26
+	sb.content_margin_right = 26
+	p.add_theme_stylebox_override("panel", sb)
+	return p
+
+
 static func label(text: String, size := 22, color := TEXT, outline := 0) -> Label:
 	var l := Label.new()
 	l.text = text

@@ -84,7 +84,7 @@ func setup(p_id: int, p_player: bool, p_name: String, p_type: String, p_weapon: 
 	radius = stats["width"] * 0.5
 	half_len = (stats["length"] - stats["width"]) * 0.5
 	model = CarModel.new()
-	model.setup(p_type, p_color, p_player)
+	model.setup(p_type, p_color, p_player, p_weapon)
 	add_child(model)
 	_make_dust()
 	if not is_player:
@@ -249,7 +249,7 @@ func _make_dust() -> void:
 
 func _make_hp_bar() -> void:
 	hp_bar = Node3D.new()
-	hp_bar.position = Vector3(0, 3.2, 0)
+	hp_bar.position = Vector3(0, 3.6, 0)
 	add_child(hp_bar)
 	var back := MeshInstance3D.new()
 	var qm := QuadMesh.new()

@@ -1,19 +1,18 @@
 class_name TrackBuilder
 extends RefCounted
-## Builds the desert canyon visuals around a TrackData. Purely cosmetic: collisions and
-## rules use TrackData math, so this blocking can be replaced by real art later.
+## Builds the desert canyon around a TrackData from Blender-made props (assets/models) and
+## procedural textures (assets/textures). Purely cosmetic: physics and rules use TrackData.
 
 const SAND := Color("d29a63")
-const SAND_DARK := Color("b9804f")
-const ASPHALT := Color("6e635b")
-const SHOULDER := Color("c79a72")
-const LINE := Color("efe6d4")
-const RUST := Color("8d4a2a")
+const LINE := Color("f4ecda")
 const ROCKS := [Color("b5562f"), Color("a24827"), Color("c86a3c"), Color("9a5236"), Color("d07a48")]
+const MODELS := "res://assets/models/"
+const CHUNK := 120.0          # metres of track per MultiMesh chunk (frustum culling)
 
 var track: TrackData
 var root: Node3D
 var rng := RandomNumberGenerator.new()
+var _mesh_cache: Dictionary = {}
 
 
 static func build(parent: Node3D, p_track: TrackData, with_env := true) -> Node3D:
@@ -31,7 +30,8 @@ static func build(parent: Node3D, p_track: TrackData, with_env := true) -> Node3
 	b._barriers()
 	b._chevrons()
 	b._start_line()
-	b._rocks()
+	b._canyon()
+	b._props()
 	return b.root
 
 
@@ -42,62 +42,105 @@ static func unshaded(c: Color) -> StandardMaterial3D:
 	return m
 
 
+## Golden-hour desert light. Forward+ features (SSAO, glow, adjustments) are ignored
+## by the Compatibility/Mobile renderers, so the same setup degrades gracefully.
 static func add_environment(parent: Node3D) -> void:
 	var env := Environment.new()
 	var sky := Sky.new()
 	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color("6f9cc4")
-	sm.sky_horizon_color = Color("e9c9a0")
-	sm.ground_bottom_color = Color("9b6a44")
-	sm.ground_horizon_color = Color("e9c9a0")
-	sm.sun_angle_max = 30.0
+	sm.sky_top_color = Color("4f7fb3")
+	sm.sky_horizon_color = Color("f0c99a")
+	sm.ground_bottom_color = Color("7a4a2c")
+	sm.ground_horizon_color = Color("e8b888")
+	sm.sun_angle_max = 25.0
+	sm.sky_energy_multiplier = 1.0
 	sky.sky_material = sm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("c9b8a6")
-	env.ambient_light_energy = 0.35
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.55
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.1
+	env.tonemap_white = 6.0
+	env.ssao_enabled = true
+	env.ssao_radius = 1.6
+	env.ssao_intensity = 2.2
+	env.ssao_power = 1.6
+	env.glow_enabled = true
+	env.glow_intensity = 0.7
+	env.glow_bloom = 0.04
+	env.glow_hdr_threshold = 1.1
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.fog_enabled = true
-	env.fog_light_color = Color("c99a72")
-	env.fog_density = 0.0007
-	env.fog_sky_affect = 0.3
+	env.fog_light_color = Color("e7b98c")
+	env.fog_density = 0.0009
+	env.fog_sky_affect = 0.2
+	env.adjustment_enabled = true
+	env.adjustment_saturation = 1.15
+	env.adjustment_contrast = 1.06
 	var we := WorldEnvironment.new()
 	we.environment = env
 	parent.add_child(we)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52, -38, 0)
-	sun.light_color = Color(1.0, 0.92, 0.8)
-	sun.light_energy = 1.0
+	sun.rotation_degrees = Vector3(-38, -40, 0)
+	sun.light_color = Color(1.0, 0.86, 0.68)
+	sun.light_energy = 1.7
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 140.0
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.shadow_bias = 0.04
+	sun.shadow_blur = 1.5
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_max_distance = 160.0
 	parent.add_child(sun)
 
+
+# ------------------------------------------------------------------ materials
+
+static func _tex(n: String) -> Texture2D:
+	return MatLib.tex(n)
+
+
+func _asphalt_mat() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _tex("asphalt_albedo")
+	m.albedo_color = Color(0.82, 0.8, 0.8)
+	m.normal_enabled = true
+	m.normal_texture = _tex("asphalt_normal")
+	m.roughness_texture = _tex("asphalt_rough")
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	return m
+
+
+func _sand_mat(tint: Color, world_scale: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = tint
+	m.albedo_texture = _tex("sand_albedo")
+	m.normal_enabled = true
+	m.normal_texture = _tex("sand_normal")
+	m.roughness = 1.0
+	m.uv1_triplanar = true
+	m.uv1_world_triplanar = true
+	m.uv1_scale = Vector3.ONE * world_scale
+	return m
+
+
+# ------------------------------------------------------------------ geometry
 
 func _ground() -> void:
 	var mi := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(1600, 1600)
+	pm.size = Vector2(1800, 1800)
 	mi.mesh = pm
-	var m := StandardMaterial3D.new()
-	m.albedo_color = SAND
-	m.roughness = 1.0
-	mi.material_override = m
+	mi.material_override = _sand_mat(Color.WHITE, 0.07)
 	mi.position = Vector3(130, -0.03, 40)
 	root.add_child(mi)
-	# darker sand patches for texture/scale cues
-	var mm := _multimesh(_cyl_mesh(1.0, 1.0, 0.01, 8), 260, true)
-	for i in 260:
-		var p := Vector3(rng.randf_range(-350, 600), -0.012, rng.randf_range(-450, 550))
-		var r := rng.randf_range(4, 18)
-		var t := Transform3D(Basis().scaled(Vector3(r, 1, r * rng.randf_range(0.5, 1.2))).rotated(Vector3.UP, rng.randf() * TAU), p)
-		mm.multimesh.set_instance_transform(i, t)
-		mm.multimesh.set_instance_color(i, SAND_DARK.lerp(SAND, rng.randf() * 0.5))
-	root.add_child(mm)
 
 
-func _strip(offset_a: Vector2, offset_b: Vector2, y: float, color: Color, jitter := 0.0, filter := Callable()) -> MeshInstance3D:
+## Strip along the track between lateral offsets a and b, each Vector2(k, c) = k*half_width + c.
+## UV: u = lateral metres / uv_tile, v = arc length / uv_tile.
+func _strip(a: Vector2, b: Vector2, y: float, mat: Material, color := Color.WHITE,
+		uv_tile := 8.0, filter := Callable(), alpha_fn := Callable()) -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var n := track.count
@@ -105,155 +148,161 @@ func _strip(offset_a: Vector2, offset_b: Vector2, y: float, color: Color, jitter
 		var j := (i + 1) % n
 		if filter.is_valid() and not filter.call(i):
 			continue
-		var c1 := color
-		var c2 := color
-		if jitter > 0.0:
-			c1 = color.lightened(sin(i * 0.37) * jitter + sin(i * 0.11) * jitter)
-			c2 = color.lightened(sin(j * 0.37) * jitter + sin(j * 0.11) * jitter)
+		var sj := track.s_at[i] + track.length / n
 		var ri := TrackData.right_of(track.tans[i])
 		var rj := TrackData.right_of(track.tans[j])
-		var hi := track.half_w[i]
-		var hj := track.half_w[j]
-		var a0 := track.pts[i] + ri * _off(offset_a, hi)
-		var a1 := track.pts[i] + ri * _off(offset_b, hi)
-		var b0 := track.pts[j] + rj * _off(offset_a, hj)
-		var b1 := track.pts[j] + rj * _off(offset_b, hj)
-		var v := [Vector3(a0.x, y, a0.y), Vector3(a1.x, y, a1.y), Vector3(b0.x, y, b0.y), Vector3(b1.x, y, b1.y)]
+		var oa_i := a.x * track.half_w[i] + a.y
+		var ob_i := b.x * track.half_w[i] + b.y
+		var oa_j := a.x * track.half_w[j] + a.y
+		var ob_j := b.x * track.half_w[j] + b.y
+		var verts := [
+			[track.pts[i] + ri * oa_i, oa_i, track.s_at[i], i],
+			[track.pts[i] + ri * ob_i, ob_i, track.s_at[i], i],
+			[track.pts[j] + rj * oa_j, oa_j, sj, j],
+			[track.pts[j] + rj * ob_j, ob_j, sj, j],
+		]
 		for k in [0, 2, 1, 1, 2, 3]:
-			st.set_color(c1 if k < 2 else c2)
+			var v: Array = verts[k]
+			var c := color
+			if alpha_fn.is_valid():
+				c.a = alpha_fn.call(v[3])
+			st.set_color(c)
 			st.set_normal(Vector3.UP)
-			st.add_vertex(v[k])
+			st.set_uv(Vector2(float(v[1]) / uv_tile, float(v[2]) / uv_tile))
+			var p: Vector2 = v[0]
+			st.add_vertex(Vector3(p.x, y, p.y))
+	st.generate_tangents()
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.vertex_color_is_srgb = true
-	m.roughness = 0.95
-	mi.material_override = m
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(mi)
 	return mi
 
 
-## Lateral offset encoded as Vector2(k, c) = k * half_width + c (meters, + = right).
-static func _off(o: Vector2, hw: float) -> float:
-	return o.x * hw + o.y
-
-
 func _road() -> void:
-	_strip(Vector2(-1, -3.5), Vector2(-1, 0), 0.01, SHOULDER)
-	_strip(Vector2(1, 0), Vector2(1, 3.5), 0.01, SHOULDER)
-	_strip(Vector2(-1, 0), Vector2(1, 0), 0.02, ASPHALT, 0.04)
+	var shoulder := _sand_mat(Color("d8c0a4"), 0.12)
+	_strip(Vector2(-1, -4.0), Vector2(-1, 0), 0.01, shoulder)
+	_strip(Vector2(1, 0), Vector2(1, 4.0), 0.01, shoulder)
+	_strip(Vector2(-1, 0), Vector2(1, 0), 0.02, _asphalt_mat(), Color.WHITE, 9.0)
+	# tyre marks: denser on curves, where cars slide
+	var tm := StandardMaterial3D.new()
+	tm.albedo_texture = _tex("tiremarks")
+	tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	tm.vertex_color_use_as_albedo = true
+	tm.roughness = 0.6
+	_strip(Vector2(-1, 1.0), Vector2(1, -1.0), 0.025, tm, Color.WHITE, 22.0, Callable(),
+		func(i: int) -> float: return clampf(0.25 + absf(track.curv[i]) * 25.0, 0.25, 0.9))
 
 
 func _lines() -> void:
-	# edge lines
-	_strip(Vector2(-1, 0.6), Vector2(-1, 0.95), 0.03, LINE)
-	_strip(Vector2(1, -0.95), Vector2(1, -0.6), 0.03, LINE)
-	# dashed center line on wide sections
-	_strip(Vector2(0, -0.18), Vector2(0, 0.18), 0.03, LINE, 0.0, func(i: int) -> bool:
+	var line := StandardMaterial3D.new()
+	line.albedo_color = LINE
+	line.albedo_texture = _tex("grime_albedo")
+	line.roughness = 0.7
+	_strip(Vector2(-1, 0.6), Vector2(-1, 0.95), 0.03, line)
+	_strip(Vector2(1, -0.95), Vector2(1, -0.6), 0.03, line)
+	_strip(Vector2(0, -0.18), Vector2(0, 0.18), 0.03, line, Color.WHITE, 8.0, func(i: int) -> bool:
 		return (i / 3) % 2 == 0 and track.half_w[i] >= 8.5)
-	# red/white curbs on curves
-	var curvy := func(i: int) -> bool:
-		return absf(track.curv[i]) > 1.0 / 55.0
-	var red_c := func(i: int) -> bool:
-		return curvy.call(i) and i % 2 == 0
-	var white_c := func(i: int) -> bool:
-		return curvy.call(i) and i % 2 == 1
-	_strip(Vector2(-1, 0), Vector2(-1, 1.1), 0.035, Color("c7372c"), 0.0, red_c)
-	_strip(Vector2(-1, 0), Vector2(-1, 1.1), 0.035, LINE, 0.0, white_c)
-	_strip(Vector2(1, -1.1), Vector2(1, 0), 0.035, Color("c7372c"), 0.0, red_c)
-	_strip(Vector2(1, -1.1), Vector2(1, 0), 0.035, LINE, 0.0, white_c)
+	var curvy := func(i: int) -> bool: return absf(track.curv[i]) > 1.0 / 55.0
+	var red := StandardMaterial3D.new()
+	red.albedo_color = Color("c8392c")
+	red.albedo_texture = _tex("grime_albedo")
+	for side: float in [-1.0, 1.0]:
+		var a := Vector2(side, -1.1 if side > 0 else 0.0)
+		var b := Vector2(side, 0.0 if side > 0 else 1.1)
+		_strip(a, b, 0.035, red, Color.WHITE, 8.0, func(i: int) -> bool: return curvy.call(i) and i % 2 == 0)
+		_strip(a, b, 0.035, line, Color.WHITE, 8.0, func(i: int) -> bool: return curvy.call(i) and i % 2 == 1)
 
 
-func _multimesh(mesh: Mesh, count: int, colors: bool) -> MultiMeshInstance3D:
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = colors
-	mm.mesh = mesh
-	mm.instance_count = count
-	var mi := MultiMeshInstance3D.new()
-	mi.multimesh = mm
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = colors
-	m.vertex_color_is_srgb = colors
-	m.roughness = 0.9
-	mi.material_override = m
-	return mi
+# ------------------------------------------------------------------ instanced props
+
+## Loads a (single-mesh) prop glb and returns its mesh with library materials applied.
+func _prop_mesh(name: String, variant := "") -> Mesh:
+	var key := name + variant
+	if _mesh_cache.has(key):
+		return _mesh_cache[key]
+	var scene: Node = load(MODELS + name + ".glb").instantiate()
+	var found: Array = scene.find_children("*", "MeshInstance3D", true, false)
+	var mesh: Mesh = (found[0] as MeshInstance3D).mesh.duplicate()
+	for i in mesh.get_surface_count():
+		var src := mesh.surface_get_material(i)
+		var n := src.resource_name if src else ""
+		var m := MatLib.get_mat(n)
+		if n == "Sign" and variant == "R":
+			m = (m as StandardMaterial3D).duplicate()
+			m.uv1_scale = Vector3(-1, 1, 1)
+		mesh.surface_set_material(i, m)
+	scene.free()
+	_mesh_cache[key] = mesh
+	return mesh
 
 
-static func _cyl_mesh(top: float, bottom: float, h: float, seg: int) -> CylinderMesh:
-	var cm := CylinderMesh.new()
-	cm.top_radius = top
-	cm.bottom_radius = bottom
-	cm.height = h
-	cm.radial_segments = seg
-	cm.rings = 1
-	return cm
+## items: Array of [s, Transform3D, Color]. Builds one MultiMesh per track chunk.
+func _instances(mesh: Mesh, items: Array, shadows := true, colors := false) -> void:
+	var chunks: Dictionary = {}
+	for it in items:
+		var k := int(float(it[0]) / CHUNK)
+		if not chunks.has(k):
+			chunks[k] = []
+		chunks[k].append(it)
+	for k in chunks:
+		var list: Array = chunks[k]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = colors
+		mm.mesh = mesh
+		mm.instance_count = list.size()
+		for i in list.size():
+			mm.set_instance_transform(i, list[i][1])
+			if colors:
+				mm.set_instance_color(i, list[i][2])
+		var mi := MultiMeshInstance3D.new()
+		mi.multimesh = mm
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mi)
+
+
+func _along(i: int, side: float, off: float) -> Vector2:
+	return track.pts[i] + TrackData.right_of(track.tans[i]) * side * (track.half_w[i] + off)
 
 
 func _barriers() -> void:
-	var n := track.count
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.6, 1.0, 2.1)
-	var mm := _multimesh(bm, n * 2, true)
-	var k := 0
-	for i in n:
-		var t := track.tans[i]
-		var r := TrackData.right_of(t)
+	var items: Array = []
+	var seg := 3.6   # model is 4 m long: overlap so curves have no gaps
+	var s := 0.0
+	while s < track.length:
+		var t := track.tangent_at(s + seg * 0.5)
 		var h := TrackData.heading_of(t)
-		for side in [-1.0, 1.0]:
-			var p: Vector2 = track.pts[i] + r * side * (track.half_w[i] + 0.45)
-			var tr := Transform3D(Basis(Vector3.UP, h), Vector3(p.x, 0.5, p.y))
-			mm.multimesh.set_instance_transform(k, tr)
-			var c := RUST.lerp(Color("b0602e"), 0.5 + 0.5 * sin(i * 0.9 + side))
-			if (i / 4) % 2 == 0:
-				c = c.darkened(0.15)
-			mm.multimesh.set_instance_color(k, c)
-			k += 1
-	root.add_child(mm)
+		for side: float in [-1.0, 1.0]:
+			var p := track.point_at(s + seg * 0.5) + TrackData.right_of(t) * side * (track.half_width_at(s) + 0.55)
+			var basis := Basis(Vector3.UP, h - PI * 0.5)
+			if side > 0:
+				basis = Basis(Vector3.UP, h + PI * 0.5)   # posts outside on both sides
+			items.append([s, Transform3D(basis.scaled(Vector3(1.02, 1.3, 1.0)), Vector3(p.x, 0.0, p.y))])
+		s += seg
+	_instances(_prop_mesh("barrier"), items)
 
 
-## Large light chevron boards on the outside of curves, pointing into the turn.
+## Chevron boards behind the barrier on the outside of curves, facing oncoming cars.
 func _chevrons() -> void:
-	var board_mat := StandardMaterial3D.new()
-	board_mat.albedo_color = Color("7d2f1d")
-	var chev_mat := unshaded(Color("fff3dc"))
-	var n := track.count
+	var left: Array = []
+	var right: Array = []
 	var i := 0
-	while i < n:
+	while i < track.count:
 		var c := track.curv[i]
 		if absf(c) > 1.0 / 60.0:
 			var t := track.tans[i]
-			var r := TrackData.right_of(t)
-			var outside := -signf(c)   # right turn (c > 0) → outside is left (−)
-			var p: Vector2 = track.pts[i] + r * outside * (track.half_w[i] + 2.6)
-			var node := Node3D.new()
-			node.position = Vector3(p.x, 0, p.y)
-			# board faces oncoming traffic, tilted back to read from the high camera
-			node.rotation = Vector3(0, TrackData.heading_of(t) + PI, 0)
-			root.add_child(node)
-			var board := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = Vector3(3.2, 1.9, 0.15)
-			board.mesh = bm
-			board.material_override = board_mat
-			board.position = Vector3(0, 1.0, 0)
-			board.rotation.x = -1.1   # tilted back so the face reads from the high camera
-			node.add_child(board)
-			# ">" pointing into the turn. Board local +X = driver's right.
-			var dir := signf(c)       # + = right turn
-			for k in [-1.0, 1.0]:
-				var bar := MeshInstance3D.new()
-				var sb := BoxMesh.new()
-				sb.size = Vector3(1.35, 0.34, 0.05)
-				bar.mesh = sb
-				bar.material_override = chev_mat
-				bar.position = Vector3(0, k * 0.42, 0.1)
-				bar.rotation.z = -k * dir * 0.7
-				board.add_child(bar)
-			i += 5
+			var outside := -signf(c)
+			var p := _along(i, outside, 2.8)
+			var tr := Transform3D(Basis(Vector3.UP, TrackData.heading_of(-t)).scaled(Vector3.ONE * 1.5), Vector3(p.x, 0, p.y))
+			# texture shows "<" (turn left); mirrored variant for right turns
+			(right if c > 0 else left).append([track.s_at[i], tr])
+			i += 6
 		else:
 			i += 1
+	_instances(_prop_mesh("chevron_board"), left)
+	_instances(_prop_mesh("chevron_board", "R"), right)
 
 
 func _start_line() -> void:
@@ -264,35 +313,40 @@ func _start_line() -> void:
 	var cols := int(hw * 2.0 / sq)
 	var bm := BoxMesh.new()
 	bm.size = Vector3(sq, 0.02, sq)
-	var mm := _multimesh(bm, cols * 2, true)
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color("f2efe8")
+	var black := StandardMaterial3D.new()
+	black.albedo_color = Color("1c1b1a")
 	var h := TrackData.heading_of(t)
-	var k := 0
 	for row in 2:
 		for c in cols:
 			var p := track.pts[0] + r * (-hw + sq * (c + 0.5)) + t * (sq * (row - 0.5))
-			mm.multimesh.set_instance_transform(k, Transform3D(Basis(Vector3.UP, h), Vector3(p.x, 0.04, p.y)))
-			mm.multimesh.set_instance_color(k, Color.WHITE if (row + c) % 2 == 0 else Color("1a1a1a"))
-			k += 1
-	root.add_child(mm)
-	# side posts with banners
-	for side in [-1.0, 1.0]:
-		var p: Vector2 = track.pts[0] + r * side * (hw + 1.6)
+			var mi := MeshInstance3D.new()
+			mi.mesh = bm
+			mi.material_override = white if (row + c) % 2 == 0 else black
+			mi.position = Vector3(p.x, 0.04, p.y)
+			mi.rotation.y = h
+			root.add_child(mi)
+	# gantry posts with banners
+	for side: float in [-1.0, 1.0]:
+		var p: Vector2 = track.pts[0] + r * side * (hw + 1.8)
 		var post := MeshInstance3D.new()
 		var pbm := BoxMesh.new()
-		pbm.size = Vector3(0.5, 4.0, 0.5)
+		pbm.size = Vector3(0.5, 4.5, 0.5)
 		post.mesh = pbm
-		post.material_override = CarModel.mat(Color("2b2622"))
-		post.position = Vector3(p.x, 2.0, p.y)
+		post.material_override = MatLib.get_mat("Steel")
+		post.position = Vector3(p.x, 2.25, p.y)
 		root.add_child(post)
 		var flag := MeshInstance3D.new()
 		var fbm := BoxMesh.new()
-		fbm.size = Vector3(1.6, 0.9, 0.08)
+		fbm.size = Vector3(1.8, 1.0, 0.08)
 		flag.mesh = fbm
-		flag.material_override = unshaded(Color("1fc8c0") if side > 0 else Color("f2ead8"))
-		flag.position = Vector3(p.x, 3.6, p.y)
+		var fm := StandardMaterial3D.new()
+		fm.albedo_color = Color("1fc8c0") if side > 0 else Color("f2ead8")
+		flag.material_override = fm
+		flag.position = Vector3(p.x, 3.9, p.y)
 		flag.rotation.y = h
 		root.add_child(flag)
-	# grid slot marks
 	for g in Cfg.RACER_COUNT:
 		var gs := track.length - 10.0 - (g / 2) * 9.0 - (g % 2) * 4.5
 		var gp := track.point_at(gs) + TrackData.right_of(track.tangent_at(gs)) * (3.2 if g % 2 == 0 else -3.2)
@@ -300,52 +354,83 @@ func _start_line() -> void:
 		var mbm := BoxMesh.new()
 		mbm.size = Vector3(2.6, 0.02, 0.25)
 		mark.mesh = mbm
-		mark.material_override = unshaded(LINE)
+		mark.material_override = MatLib.get_mat("Stripe")
 		var fwd := track.tangent_at(gs)
 		mark.position = Vector3(gp.x + fwd.x * 2.6, 0.035, gp.y + fwd.y * 2.6)
 		mark.rotation.y = h
 		root.add_child(mark)
 
 
-## Canyon: mesas/buttes outside the road, kept away from every road section so they
-## never sit right on the racing line from the high camera.
-func _rocks() -> void:
-	var meshes := [_cyl_mesh(0.75, 1.0, 1.0, 6), _cyl_mesh(0.55, 1.0, 1.0, 5), _cyl_mesh(0.9, 1.0, 1.0, 7)]
-	var lists: Array = [[], [], []]
-	var n := track.count
+func _rock_xf(p: Vector2, scale: Vector3, sink := 0.0) -> Transform3D:
+	var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(scale)
+	return Transform3D(b, Vector3(p.x, -sink, p.y))
+
+
+## Canyon: low boulders near the barriers, mesas and cliffs further out, a tall rim far away.
+## Everything keeps clear of every road section (checked against the whole centerline).
+func _canyon() -> void:
+	var groups := {"rock_boulder": [], "rock_slab": [], "rock_mesa": [], "rock_spire": [], "cliff": []}
 	var i := 0
-	while i < n:
-		for side in [-1.0, 1.0]:
-			if rng.randf() < 0.25:
-				continue
-			var dist := rng.randf_range(9.0, 60.0)
-			var s := track.s_at[i]
-			var r := TrackData.right_of(track.tans[i])
-			var p: Vector2 = track.pts[i] + r * side * (track.half_w[i] + dist)
-			var rad := rng.randf_range(3.0, 9.0) * (0.6 + dist / 60.0)
-			var clearance := track.distance_to_road_edge(p) - rad
-			if clearance < 6.0:
-				continue
-			var hgt := rng.randf_range(4.0, 9.0) + clearance * rng.randf_range(0.15, 0.45)
-			hgt = minf(hgt, 6.0 + clearance * 0.9)
-			lists[rng.randi() % 3].append([p, rad, hgt])
-		i += 3
-	# far canyon rim
-	for k in 90:
-		var a := TAU * k / 90.0
-		var p := Vector2(130, 40) + Vector2(cos(a) * rng.randf_range(420, 520), sin(a) * rng.randf_range(430, 540))
-		lists[k % 3].append([p, rng.randf_range(25, 50), rng.randf_range(35, 80)])
-	for mi in 3:
-		var arr: Array = lists[mi]
-		var mm := _multimesh(meshes[mi], arr.size(), true)
-		for k in arr.size():
-			var e: Array = arr[k]
-			var p: Vector2 = e[0]
-			var rad: float = e[1]
-			var hgt: float = e[2]
-			var b := Basis().scaled(Vector3(rad, hgt, rad * rng.randf_range(0.7, 1.3))).rotated(Vector3.UP, rng.randf() * TAU)
-			mm.multimesh.set_instance_transform(k, Transform3D(b, Vector3(p.x, hgt * 0.5 - 0.3, p.y)))
-			var col: Color = ROCKS[rng.randi() % ROCKS.size()]
-			mm.multimesh.set_instance_color(k, col.lightened(rng.randf_range(-0.08, 0.08)))
-		mm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		root.add_child(mm)
+	while i < track.count:
+		var s := track.s_at[i]
+		for side: float in [-1.0, 1.0]:
+			# near band: boulders/slabs, low enough not to hide the road
+			if rng.randf() < 0.55:
+				var off := rng.randf_range(3.5, 8.0)
+				var p := _along(i, side, off)
+				var sc := rng.randf_range(1.2, 2.6)
+				if track.distance_to_road_edge(p) - sc * 1.2 > 2.8:
+					var kind := "rock_boulder" if rng.randf() < 0.6 else "rock_slab"
+					groups[kind].append([s, _rock_xf(p, Vector3(sc, sc * rng.randf_range(0.7, 1.2), sc), 0.2)])
+			# mid band: canyon walls
+			if rng.randf() < 0.7:
+				var off := rng.randf_range(12.0, 34.0)
+				var p := _along(i, side, off)
+				var sc := rng.randf_range(4.0, 9.0)
+				var clear := track.distance_to_road_edge(p) - sc * 1.3
+				if clear > 5.0:
+					var kind: String = ["rock_mesa", "cliff", "cliff", "rock_spire"][rng.randi() % 4]
+					var hs := clampf(sc * rng.randf_range(0.8, 1.6), 3.0, 4.0 + clear * 0.8)
+					groups[kind].append([s, _rock_xf(p, Vector3(sc, hs, sc), 0.5)])
+		i += 4
+	# far rim
+	for k in 110:
+		var a := TAU * k / 110.0
+		var p := Vector2(130, 40) + Vector2(cos(a) * rng.randf_range(430, 520), sin(a) * rng.randf_range(440, 540))
+		var sc := rng.randf_range(25.0, 45.0)
+		groups["cliff" if k % 2 == 0 else "rock_mesa"].append([track.length + 1.0 + (k % 6) * CHUNK, _rock_xf(p, Vector3(sc, sc * rng.randf_range(0.8, 1.5), sc), 2.0)])
+	for kind in groups:
+		_instances(_prop_mesh(kind), groups[kind])
+
+
+## Roadside dressing: crates and barrels behind barriers, bushes and stones on the sand.
+func _props() -> void:
+	var crates: Array = []
+	var barrels: Array = []
+	var bushes: Array = []
+	var stones: Array = []
+	var i := 0
+	while i < track.count:
+		var s := track.s_at[i]
+		var side := -1.0 if rng.randf() < 0.5 else 1.0
+		var r := rng.randf()
+		var p := _along(i, side, rng.randf_range(1.6, 3.2))
+		var ok := track.distance_to_road_edge(p) > 1.3
+		if ok and r < 0.12:
+			crates.append([s, Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(p.x, 0, p.y))])
+			if rng.randf() < 0.5:
+				crates.append([s, Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(p.x + 0.2, 1.2, p.y + 0.1))])
+		elif ok and r < 0.22:
+			barrels.append([s, Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(p.x, 0, p.y))])
+		var bp := _along(i, -side, rng.randf_range(2.0, 14.0))
+		if track.distance_to_road_edge(bp) > 1.5:
+			var bs := rng.randf_range(0.8, 1.6)
+			bushes.append([s, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * bs), Vector3(bp.x, 0, bp.y))])
+		var sp := _along(i, side, rng.randf_range(1.2, 6.0))
+		if track.distance_to_road_edge(sp) > 0.9:
+			stones.append([s, Transform3D(Basis(Vector3.UP, rng.randf() * TAU), Vector3(sp.x, 0, sp.y))])
+		i += 5
+	_instances(_prop_mesh("crate"), crates)
+	_instances(_prop_mesh("barrel"), barrels)
+	_instances(_prop_mesh("bush"), bushes, false)
+	_instances(_prop_mesh("stones"), stones, false)

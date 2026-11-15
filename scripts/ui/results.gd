@@ -14,7 +14,7 @@ func _ready() -> void:
 		return
 	show = Showroom.new()
 	add_child(show)
-	show.build(str(r["car"]), RaceManager.PLAYER_COLOR, -3.0)
+	show.build(str(r["car"]), RaceManager.PLAYER_COLOR, -3.0, str(r["weapon"]))
 	show.spin = 0.2
 	_build_ui(r)
 

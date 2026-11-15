@@ -3,22 +3,22 @@ extends Camera3D
 ## Tilted top-down chase camera. Only the camera is smoothed; it follows the body axis
 ## (also while reversing) and composes the player low in the frame with room ahead.
 
-@export var pitch_deg := 61.0
-@export var car_screen_y := 0.68         # player position from the top of the frame
-@export var dist_slow := 29.0            # camera→car distance when stopped
-@export var dist_fast := 39.0            # at top speed (pulls back to show turns earlier)
+@export var pitch_deg := 36.0
+@export var car_screen_y := 0.75         # player position from the top of the frame
+@export var dist_slow := 13.5            # camera→car distance when stopped
+@export var dist_fast := 18.0            # at top speed (pulls back to show turns earlier)
 @export var yaw_smooth := 4.5
 @export var dist_smooth := 1.5
 
 var target: RaceCar
 var _yaw := 0.0
-var _dist := 29.0
+var _dist := 13.5
 var _shake := 0.0
 var _init_done := false
 
 
 func _ready() -> void:
-	fov = 50.0
+	fov = 58.0
 	near = 1.0
 	far = 1500.0
 

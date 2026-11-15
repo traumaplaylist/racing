@@ -139,45 +139,18 @@ func _make_pickup_node(type: String, p: Vector2) -> Node3D:
 	cm.height = 0.05
 	cm.radial_segments = 20
 	pad.mesh = cm
-	var col := Color("3ddc6a") if type == "repair" else Color("ffb21f")
-	var pm := TrackBuilder.unshaded(col.darkened(0.35))
+	var col := Color("2fe8d8") if type == "repair" else Color("ffb21f")
+	var pm := TrackBuilder.unshaded(Color(col.r, col.g, col.b, 0.45))
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	pad.material_override = pm
 	pad.position.y = 0.04
 	n.add_child(pad)
-	var icon := Node3D.new()
+	var icon: Node3D = load("res://assets/models/pickup_%s.glb" % type).instantiate()
+	MatLib.apply(icon)
 	icon.name = "Icon"
 	icon.position.y = 1.6
+	icon.scale = Vector3.ONE * (1.2 if type == "repair" else 1.6)
 	n.add_child(icon)
-	var m := TrackBuilder.unshaded(col)
-	var white := TrackBuilder.unshaded(Color("fffaf0"))
-	if type == "repair":
-		# cross
-		for sz in [Vector3(2.0, 0.6, 0.6), Vector3(0.6, 0.6, 2.0)]:
-			var b := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = sz
-			b.mesh = bm
-			b.material_override = white
-			icon.add_child(b)
-		var base := MeshInstance3D.new()
-		var bb := BoxMesh.new()
-		bb.size = Vector3(2.5, 0.3, 2.5)
-		base.mesh = bb
-		base.material_override = m
-		base.position.y = -0.45
-		icon.add_child(base)
-	else:
-		# double chevron pointing along travel direction (+Z local, rotated per frame)
-		for row in 2:
-			for side in [-1.0, 1.0]:
-				var b := MeshInstance3D.new()
-				var bm := BoxMesh.new()
-				bm.size = Vector3(1.3, 0.45, 0.45)
-				b.mesh = bm
-				b.material_override = m if row == 0 else white
-				b.position = Vector3(side * 0.45, 0, row * 1.0 - 0.5)
-				b.rotation.y = side * 0.75
-				icon.add_child(b)
 	return n
 
 
